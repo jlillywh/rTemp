@@ -1,0 +1,4018 @@
+' Greg Pelletier
+' Washington State Department of Ecology
+' P.O. Box 76000
+' Olympia, WA 98504-7600
+' e-mail: gpel461@ecy.wa.gov
+
+Public Const pii As Double = 3.14159265358979
+
+Option Explicit
+
+'gp 13-Nov-2012 new code for compatibility with 32-bit and 64-bit Office 2010
+'http://msdn.microsoft.com/en-us/library/ff700513(v=office.11).aspx
+#If VBA7 Then
+
+  Declare PtrSafe Function OpenProcess Lib "kernel32" _
+    (ByVal dwDesiredAccess As Long, _
+    ByVal bInheritHandle As Long, _
+    ByVal dwProcessId As Long) As Long
+
+  Declare PtrSafe Function GetExitCodeProcess Lib "kernel32" _
+    (ByVal hProcess As Long, _
+    lpExitCode As Long) As Long
+    
+  Declare PtrSafe Function CloseHandle Lib "kernel32" (ByVal hObject As Long) As Long
+
+#Else
+
+  Declare Function OpenProcess Lib "kernel32" _
+    (ByVal dwDesiredAccess As Long, _
+    ByVal bInheritHandle As Long, _
+    ByVal dwProcessId As Long) As Long
+
+  Declare Function GetExitCodeProcess Lib "kernel32" _
+    (ByVal hProcess As Long, _
+    lpExitCode As Long) As Long
+     
+  Declare Function CloseHandle Lib "kernel32" (ByVal hObject As Long) As Long
+
+#End If
+
+Sub calc()
+'calculation of response temperature
+
+'Temperature parameters
+Const Acoeff As Double = 0.6, RL As Double = 0.03, Bowen As Double = 0.47
+Const eps As Double = 0.97, sigma As Double = 0.000000117
+Const rhow As Double = 1, Cpw As Double = 1    'water density (g/cm^3), water specific heat (cal/g/degC)
+
+'NOAA solar position variables:
+Dim lat As Double, lon As Double, timezone As Double, dlstime As Double
+Dim daycount As Double, ndays As Double
+Dim currentdatetime As Double, startdate As Double, starttime As Double
+Dim timestep As Double, previousTimestep As Double
+Dim curyear As Double, curmonth As Double, curday As Double, curhh As Double, curmm As Double, curss As Double
+Dim az As Double, el As Double
+'Qual2k variables:
+Dim photo As Double, Idaily As Double, Ia As Double, cloudfrac As Double, nfac As Double
+Dim Jsn As Double, Jsm As Double, Jsnt As Double, Iout As Double, SolarRad As Double
+Dim JsntPotential As Double, JsntAfterCC As Double, JsntAfterCCandShade As Double
+Dim trise As Double, tset As Double
+Dim aznoaa As Double, elnoaa As Double
+Dim jd As Integer, t As Double
+Dim Iclear As Double
+'gp ratio of direct to diffuse radiation for Boyd's thesis eqn 3.56
+Dim radd2radb As Double
+'Shade variables
+Dim ZEN As Double, ZENDEG As Double
+Dim RADG As Double, RADB As Double, RADD As Double
+Dim solarConstant As Double, Jsnt2 As Double, erv As Double
+Dim RADEH As Double, KT As Double, DF As Double
+Dim dailyRADEH As Double, dailyRADEI As Double
+Dim ALDO As Double
+'solar intensity variables for Bird model
+'Dim solConNREL As Double, RavBeta As Double, Rav2Rsq As Double
+Dim pressureMb As Double, ozoneCm As Double, waterCm As Double
+Dim AOD500nm As Double, AOD380nm As Double, Ba As Double, albedo As Double
+Dim ETR As Double, directBeam As Double, directHz As Double, globalHz As Double, diffuseHz As Double
+Dim visibility As Double
+
+Dim i As Long, npt As Long
+Dim airtemp As Double, dewpoint As Double, Uw As Double, cloudcover As Double
+Dim responseTemp As Double, responseTempMin As Double, dTe As Double
+Dim TeStab As Double, StabTestCriteria As Double
+Dim responseTempInit As Double
+Dim waterDepth As Double, effectiveShade As Double
+Dim windHeight As Double, effectiveWind As Double
+Dim groundwaterTemp As Double, groundwaterInflow As Double, Jgroundwater As Double
+
+Dim es As Double, eair As Double
+Dim fUw As Double, Uw_2m As Double, Uw_7m As Double, Uw_10m As Double
+Dim longat As Double, conv As Double, evap As Double, back As Double
+Dim emissivity As Double
+Dim longatMethod As Integer, JsntMethod As Integer
+Dim longatMethCC As Integer, JsntMethCC As Integer
+Dim fUwMethod As Integer
+Dim xdum1 As String
+
+'variables and constants for CEQUALW2 solar
+Dim eqt(12) As Double, LOCAL1 As Double, STANDARD As Double, HOUR1 As Double, h As Double
+Dim DECL As Double, sinal As Double, a0 As Double, SRO As Double
+Dim jday As Double
+Dim nday As Integer, JDAYG As Integer
+Const BTU_FT2_DAY_TO_W_M2 As Double = 0.1314, REFL As Double = 0.06
+
+Dim Tsed As Double, dTs As Double
+Dim sedThermCond As Double, Hsed As Double, HyporheicExchange As Double
+Dim Jsedcond As Double, Jhyporheic As Double
+Dim sedThermDiff As Double, rhoCpSed As Double
+Dim writeDiagnostic As Integer
+
+Dim elevation As Double
+
+'variables for W2Met solar model
+Dim pps As Double   'not used if cc>=0
+Dim rs As Double
+Dim atc As Double
+
+'Dim variables for optional fUw methods
+Dim wmph As Double, tsa As Double, tvs As Double, dtv As Double, areaa As Double
+Dim tva As Double, ta2a As Double
+
+'gp 13-Nov-2012
+''variables for progress bar
+'Dim sb As clsProgressBar, pctComplete As Long
+Dim pctComplete As Long
+Dim pct05 As Integer, pct10 As Integer, pct15 As Integer
+Dim pct20 As Integer, pct25 As Integer, pct30 As Integer
+Dim pct35 As Integer, pct40 As Integer, pct45 As Integer
+Dim pct50 As Integer, pct55 As Integer, pct60 As Integer
+Dim pct65 As Integer, pct70 As Integer, pct75 As Integer
+Dim pct80 As Integer, pct85 As Integer, pct90 As Integer
+Dim pct95 As Integer
+
+'gp 13-Nov-2012
+Dim KCL1 As Double, KCL2 As Double, KCL3 As Double, KCL4 As Double
+Dim longcloudMethod As String
+Dim kbrut As Double
+Application.StatusBar = "Calculating, please wait..."
+
+Application.ScreenUpdating = False
+Sheets("output").Range("a3:iv65536").ClearContents
+Sheets("warnings").Range("a2:iv65536").ClearContents
+Sheets("diagnostic").Visible = True
+Sheets("diagnostic").Range("a3:iv65536").ClearContents
+Sheets("diagnostic").Select
+writeDiagnostic = Sheets("diagnostic").Range("d1").Value
+
+'check to count number of rows of met data
+'and reset cell pointers
+Sheets("input met data").Select
+Range("a3").Select
+Selection.End(xlDown).Select
+npt = ActiveCell.Row - 2
+Range("a3").Select
+Sheets("output").Select
+Range("a3").Select
+Sheets("warnings").Select
+Range("a2").Select
+Sheets("diagnostic").Select
+Range("a3").Select
+
+Sheets("input site data").Select
+   Range("b3").Select
+   lat = ActiveCell.Value
+   ActiveCell.Offset(1, 0).Select
+   lon = ActiveCell.Value
+   ActiveCell.Offset(1, 0).Select
+   elevation = ActiveCell.Value
+   ActiveCell.Offset(1, 0).Select
+   timezone = ActiveCell.Value
+   ActiveCell.Offset(1, 0).Select
+   xdum1 = ActiveCell.Value
+   If xdum1 = "Yes" Then
+    dlstime = 1
+   ElseIf xdum1 = "No" Then
+    dlstime = 0
+   Else
+    MsgBox "Need to specify whether time series data are in daylight savings time."
+    End
+   End If
+   
+   ActiveCell.Offset(1, 0).Select
+   responseTempInit = ActiveCell.Value
+      responseTemp = responseTempInit          'initialize response water temp
+      Tsed = responseTempInit                  'initialize response sediment temp
+   ActiveCell.Offset(1, 0).Select
+   responseTempMin = ActiveCell.Value
+   ActiveCell.Offset(1, 0).Select
+   waterDepth = ActiveCell.Value
+   If (waterDepth <= 0) Then
+    MsgBox "The depth must be greater than zero."
+    End
+   End If
+   ActiveCell.Offset(1, 0).Select
+   effectiveShade = ActiveCell.Value
+   If (effectiveShade < 0 Or effectiveShade > 1) Then
+    MsgBox "The effective shade must be between 0 and 1."
+    End
+   End If
+   ActiveCell.Offset(1, 0).Select
+   windHeight = ActiveCell.Value
+   If (windHeight <= 0) Then
+    MsgBox "The wind speed height must be greater than zero."
+    End
+   End If
+   ActiveCell.Offset(1, 0).Select
+   effectiveWind = ActiveCell.Value
+   If (effectiveWind < 0) Then
+    MsgBox "The effective wind factor must be >= zero."
+    End
+   End If
+   ActiveCell.Offset(1, 0).Select
+   groundwaterTemp = ActiveCell.Value
+   If (groundwaterTemp < 0) Then
+    MsgBox "The groundwater temperature must be >= zero."
+    End
+   End If
+   ActiveCell.Offset(1, 0).Select
+   
+   groundwaterInflow = ActiveCell.Value
+   If groundwaterInflow < 0 Then
+    Sheets("warnings").Select
+    ActiveCell.Value = "Negative groundwater inflow, value assumed equal to 0"
+    ActiveCell.Offset(1, 0).Select
+    groundwaterInflow = 0
+    Sheets("input site data").Select
+   End If
+   
+   ActiveCell.Offset(1, 0).Select
+   sedThermCond = ActiveCell.Value
+   If sedThermCond < 0 Then
+    Sheets("warnings").Select
+    ActiveCell.Value = "Negative sediment thermal conductivity, value assumed equal to 0"
+    ActiveCell.Offset(1, 0).Select
+    sedThermCond = 0
+    Sheets("input site data").Select
+   End If
+   sedThermCond = sedThermCond / (4.183076 * 100)      'convert from W/m/degC to (cal/s) per (cm degC)
+   'thermal conductivity is defined as the product of density * heat capacity * diffusivity
+   'in units of (cal/s) per (cm deg C), which equals W/(m deg C)
+   'divided by 4.183076 W per cal/sec and 100 cm/m
+   
+   ActiveCell.Offset(1, 0).Select
+   sedThermDiff = ActiveCell.Value                     'sediment thermal diffusivity in cm^2/sec
+   If sedThermDiff <= 0 Then
+    Sheets("warnings").Select
+    ActiveCell.Value = "Sediment density and heat capacity assumed to be the same as water because of zero or negative thermal diffusivity"
+    ActiveCell.Offset(1, 0).Select
+    rhoCpSed = 1                                       'assume same as water in case of bad value for thermal diffusivity
+    Sheets("input site data").Select
+   Else
+    If sedThermCond = 0 Then
+     Sheets("warnings").Select
+     ActiveCell.Value = "Sediment density and heat capacity assumed to be the same as water because of zero thermal conductivity"
+     ActiveCell.Offset(1, 0).Select
+     rhoCpSed = 1                                      'assume same as water in case of bad value for thermal diffusivity
+     Sheets("input site data").Select
+    Else
+     rhoCpSed = sedThermCond / sedThermDiff            'product of sediment density and heat capacity in cal/cm^3/deg C
+    End If
+   End If
+   'rhoCpSed is the product of sediment density and heat capacity
+   'since thermal conductivity is defined as density * heat capacity * diffusivity,
+   'therefore (density * heat capacity) = (conductivity / diffusivity)
+   
+   ActiveCell.Offset(1, 0).Select
+   Hsed = ActiveCell.Value
+   If Hsed <= 0 Then
+    Sheets("warnings").Select
+    ActiveCell.Value = "Negative or zero sediment thermal thickness, value assumed equal to 10 cm"
+    ActiveCell.Offset(1, 0).Select
+    Hsed = 10
+    Sheets("input site data").Select
+   End If
+   
+   ActiveCell.Offset(1, 0).Select
+   HyporheicExchange = ActiveCell.Value
+   If HyporheicExchange < 0 Then
+    Sheets("warnings").Select
+    ActiveCell.Value = "Negative hyporheic exchange, value assumed equal to 0"
+    ActiveCell.Offset(1, 0).Select
+    HyporheicExchange = 0
+    Sheets("input site data").Select
+   End If
+   
+'solar models
+ActiveCell.Offset(1, 0).Select
+   xdum1 = ActiveCell.Value
+If xdum1 = "Bras" Then
+  JsntMethod = 0
+ElseIf xdum1 = "CE-QUAL-W2" Then
+  JsntMethod = 1
+ElseIf xdum1 = "Bird" Then
+  JsntMethod = 2
+ElseIf xdum1 = "HeatSource" Then
+  JsntMethod = 3
+ElseIf xdum1 = "Ryan-Stolzenbach" Then
+  JsntMethod = 4
+ElseIf xdum1 = "Iqbal" Then
+  JsntMethod = 5
+Else
+  JsntMethod = 0
+End If
+
+'gp 13-Nov-2012
+'ActiveCell.Offset(1, 0).Select
+'   xdum1 = ActiveCell.Value
+'If xdum1 = "none" Then
+'  JsntMethCC = 0
+'ElseIf xdum1 = "TVA 1972" Then
+'  JsntMethCC = 1
+'End If
+
+ActiveCell.Offset(1, 0).Select
+nfac = ActiveCell.Value
+'If (nfac < 2 Or nfac > 5) Then
+' MsgBox "The visibility factor must be between 2 and 5."
+' End
+'End If
+ActiveCell.Offset(1, 0).Select
+atc = ActiveCell.Value
+   
+'gp 13-Nov-2012
+ActiveCell.Offset(1, 0).Select
+KCL1 = ActiveCell.Value
+If KCL1 < 0 Then
+  KCL1 = 0.65
+  ActiveCell.Value = KCL1
+ElseIf KCL1 > 1 Then
+  KCL1 = 0.65
+  ActiveCell.Value = KCL1
+End If
+ActiveCell.Offset(1, 0).Select
+KCL2 = ActiveCell.Value
+If KCL2 < 0 Then
+  KCL2 = 2#
+  ActiveCell.Value = KCL2
+ElseIf KCL2 > 5 Then
+  KCL2 = 2#
+  ActiveCell.Value = KCL2
+End If
+
+'longwave models
+ActiveCell.Offset(1, 0).Select
+   xdum1 = ActiveCell.Value
+If xdum1 = "Brunt" Then
+  longatMethod = 0
+ElseIf xdum1 = "Brutsaert" Then
+  longatMethod = 1
+ElseIf xdum1 = "Satterlund" Then
+  longatMethod = 2
+ElseIf xdum1 = "Idso-Jackson" Then
+  longatMethod = 3
+ElseIf xdum1 = "Swinbank" Then
+  longatMethod = 4
+ElseIf xdum1 = "Koberg" Then
+  longatMethod = 5
+Else
+  longatMethod = 0
+End If
+
+'gp 13-Nov-2012
+'ActiveCell.Offset(1, 0).Select
+'   xdum1 = ActiveCell.Value
+'If xdum1 = "none" Then
+'  longatMethCC = 0
+'ElseIf xdum1 = "TVA 1972" Then
+'  longatMethCC = 1
+'ElseIf xdum1 = "Brutsaert" Then
+'  longatMethCC = 2
+'ElseIf xdum1 = "cirrus" Then
+'  longatMethCC = 3
+'ElseIf xdum1 = "cirrostratus" Then
+'  longatMethCC = 4
+'ElseIf xdum1 = "altocumulus" Then
+'  longatMethCC = 5
+'ElseIf xdum1 = "cumulus" Then
+'  longatMethCC = 6
+'ElseIf xdum1 = "stratocumulus" Then
+'  longatMethCC = 7
+'ElseIf xdum1 = "nimbostratus" Then
+'  longatMethCC = 8
+'ElseIf xdum1 = "fog" Then
+'  longatMethCC = 9
+'End If
+
+'gp 13-Nov-2012
+ActiveCell.Offset(1, 0).Select
+kbrut = ActiveCell.Value
+
+ActiveCell.Offset(1, 0).Select
+longcloudMethod = ActiveCell.Value
+If longcloudMethod <> "Eqn 1" And longcloudMethod <> "Eqn 2" Then
+  longcloudMethod = "Eqn 2"
+  ActiveCell.Value = longcloudMethod
+End If
+ActiveCell.Offset(1, 0).Select
+KCL3 = ActiveCell.Value
+If KCL3 < 0 Then
+  KCL3 = 1#
+  ActiveCell.Value = KCL3
+ElseIf KCL3 > 1 Then
+  KCL3 = 1#
+  ActiveCell.Value = KCL3
+End If
+ActiveCell.Offset(1, 0).Select
+KCL4 = ActiveCell.Value
+If KCL4 < 0 Then
+  KCL4 = 1#
+  ActiveCell.Value = KCL4
+ElseIf KCL4 > 5 Then
+  KCL4 = 1#
+  ActiveCell.Value = KCL4
+End If
+
+'evaporation/convection wind model inputs
+ActiveCell.Offset(1, 0).Select
+   xdum1 = ActiveCell.Value
+If xdum1 = "Brady-Graves-Geyer" Then
+  fUwMethod = 0
+ElseIf xdum1 = "Marciano-Harbeck" Then
+  fUwMethod = 1
+ElseIf xdum1 = "Ryan-Harleman" Then
+  fUwMethod = 2
+'gp East Mesa 1 not available in rTemp because it is based on total waterbody area
+'ElseIf xdum1 = "East Mesa 1" Then
+'  fUwMethod = 3
+ElseIf xdum1 = "East Mesa" Then
+  fUwMethod = 4
+'gp Harbeck not available in rTemp because it is based on total waterbody area
+'ElseIf xdum1 = "Harbeck" Then
+'  fUwMethod = 5
+ElseIf xdum1 = "Helfrich et al" Then
+  fUwMethod = 6
+Else
+  fUwMethod = 0
+End If
+
+'stability test criteria
+ActiveCell.Offset(1, 0).Select
+StabTestCriteria = ActiveCell.Value
+
+'gp 13-Nov-2012
+''initialize progress bar
+'    Set sb = New clsProgressBar ' create a new progress bar
+'    sb.Show "Please wait", vbNullString, 0 ' display the progress bar
+    pct05 = 0
+    pct10 = 0
+    pct15 = 0
+    pct20 = 0
+    pct25 = 0
+    pct30 = 0
+    pct35 = 0
+    pct40 = 0
+    pct45 = 0
+    pct50 = 0
+    pct55 = 0
+    pct60 = 0
+    pct65 = 0
+    pct70 = 0
+    pct75 = 0
+    pct80 = 0
+    pct85 = 0
+    pct90 = 0
+    pct95 = 0
+
+For i = 1 To npt
+
+Sheets("input met data").Select
+curyear = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+curmonth = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+curday = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+curhh = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+curmm = ActiveCell.Value
+curss = 0
+ActiveCell.Offset(0, 1).Select
+airtemp = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+dewpoint = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+Uw = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+cloudfrac = ActiveCell.Value
+ActiveCell.Offset(0, 1).Select
+Jsnt = ActiveCell.Value
+'read inputs for Bird and Hulstrom insolation model
+   ActiveCell.Offset(0, 1).Select
+   pressureMb = ActiveCell.Value
+   If pressureMb <= 0 Then pressureMb = 1013
+   ActiveCell.Offset(0, 1).Select
+   ozoneCm = ActiveCell.Value
+   If ozoneCm <= 0 Then ozoneCm = 0.3
+   ActiveCell.Offset(0, 1).Select
+   waterCm = ActiveCell.Value
+   If waterCm <= 0 Then waterCm = 1.5
+   ActiveCell.Offset(0, 1).Select
+   AOD500nm = ActiveCell.Value
+   If AOD500nm <= 0 Then AOD500nm = 0.1
+   ActiveCell.Offset(0, 1).Select
+   AOD380nm = ActiveCell.Value
+   If AOD380nm <= 0 Then AOD380nm = 0.05
+   ActiveCell.Offset(0, 1).Select
+   Ba = ActiveCell.Value
+   If Ba <= 0 Then Ba = 0.85
+   ActiveCell.Offset(0, 1).Select
+   albedo = ActiveCell.Value
+   If albedo <= 0 Then albedo = 0.2
+'read inputs for Iqbal solar model
+   ActiveCell.Offset(0, 1).Select
+   visibility = ActiveCell.Value
+   If visibility <= 0 Then visibility = 10
+   ActiveCell.Offset(0, 1).Select
+   If JsntMethod = 2 Then
+    ozoneCm = ActiveCell.Value
+    If ozoneCm <= 0 Then ozoneCm = 0.3
+   End If
+   ActiveCell.Offset(0, 1).Select
+   If JsntMethod = 2 Then
+    albedo = ActiveCell.Value
+    If albedo <= 0 Then albedo = 0.2
+   End If
+
+ActiveCell.Offset(0, 1).Select
+If ActiveCell.Value > 0 Then               'optional input of time-series of water depths
+ waterDepth = ActiveCell.Value
+End If
+
+'gp 21-Jul-09
+'ActiveCell.Offset(1, -20).Select
+ActiveCell.Offset(0, 1).Select
+If ActiveCell.Value > 0 Then               'optional input of time-series of effective shade
+ effectiveShade = ActiveCell.Value
+End If
+ActiveCell.Offset(1, -21).Select
+
+If i > 1 Then
+ timestep = DateSerial(curyear, curmonth, curday) + TimeSerial(curhh, curmm, curss) - currentdatetime
+ If timestep > 2 / 24 Then
+  Sheets("warnings").Select
+  ActiveCell.Value = "Time step greater than 2 hours at data point number " & i
+  ActiveCell.Offset(1, 0).Select
+  're-initialize response water and sediment temperatures after gaps in met data
+'  responseTemp = (airtemp + dewpoint) / 2
+'  Tsed = responseTemp
+  Sheets("input met data").Select
+ End If
+ If timestep > 4 / 24 Then
+  Sheets("warnings").Select
+  ActiveCell.Value = "Time step greater than 4 hours at data point number " & i & ", response temperature reset to midpoint of air and dewpoint temperatures"
+  ActiveCell.Offset(1, 0).Select
+  're-initialize response water and sediment temperatures after gaps in met data
+  responseTemp = (airtemp + dewpoint) / 2
+  Tsed = responseTemp
+  Sheets("input met data").Select
+ End If
+ If timestep = 0 Then
+  Sheets("warnings").Select
+  ActiveCell.Value = "Duplicate meteorology input at data point number " & i
+  ActiveCell.Offset(1, 0).Select
+  Sheets("input met data").Select
+ End If
+End If
+
+If airtemp <= -999 Then
+ Sheets("warnings").Select
+ ActiveCell.Value = "Missing air temperature at data point number " & i & ", air temperature assumed equal to 20 deg C"
+ ActiveCell.Offset(1, 0).Select
+ airtemp = 20
+ Sheets("input met data").Select
+End If
+If dewpoint <= -999 Then
+ Sheets("warnings").Select
+ ActiveCell.Value = "Missing dewpoint temperature at data point number " & i & ", dewpoint temperature assumed equal to 10 deg C"
+ ActiveCell.Offset(1, 0).Select
+ dewpoint = 10
+ Sheets("input met data").Select
+End If
+If Uw < 0 Then
+ Sheets("warnings").Select
+ ActiveCell.Value = "Missing wind speed at data point number " & i & ", wind speed assumed equal to 0 m/s"
+ ActiveCell.Offset(1, 0).Select
+ Uw = 0
+ Sheets("input met data").Select
+End If
+If cloudfrac < 0 Then
+ Sheets("warnings").Select
+ ActiveCell.Value = "Missing cloud cover at data point number " & i & ", cloud cover assumed equal to 0"
+ ActiveCell.Offset(1, 0).Select
+ cloudfrac = 0
+ Sheets("input met data").Select
+End If
+If cloudfrac > 1 Then
+ Sheets("warnings").Select
+ ActiveCell.Value = "Cloud cover at data point number " & i & " greater than 1, cloud cover assumed equal to 1"
+ ActiveCell.Offset(1, 0).Select
+ cloudfrac = 1
+ Sheets("input met data").Select
+End If
+
+currentdatetime = DateSerial(curyear, curmonth, curday) + TimeSerial(curhh, curmm, curss)
+
+'adjust wind speed for shelter and height
+Uw = Uw * effectiveWind
+
+'Uw_2m = WSpeed(2, 0.0002, windHeight, Uw, 0.0024)          'wind function and roughness from www.windpower.org
+'                                                           'assuming roughness length over water is 0.0002 m
+'                                                           'and roughness length at weather station is mowed grass 0.0024 m
+'Uw_7m = WSpeed(7, 0.0002, windHeight, Uw, 0.0024)
+'Uw_10m = WSpeed(10, 0.0002, windHeight, Uw, 0.0024)
+''  Uw_2m = Uw * Log(2# / 0.003) / Log(windHeight / 0.003)    'wind adjustment with roughness lengths used in CE-QUAL-W2
+''  Uw_10m = Uw * Log(10# / 0.01) / Log(windHeight / 0.01)
+
+'use TVA exponential wind correction
+Uw_2m = Uw * (2 / windHeight) ^ 0.15                'convert wind speed to 2m height
+Uw_7m = Uw * (7 / windHeight) ^ 0.15                'convert wind speed to 7m height
+
+'calculate sunrise and sunset and photoperiod
+trise = sunrise(lat, lon, curyear, curmonth, curday, timezone, dlstime)   'units of days
+tset = sunset(lat, lon, curyear, curmonth, curday, timezone, dlstime)     'units of days
+photo = tset - trise                                                           'units of days
+jd = Julcvt(curmonth, curday, curyear)
+    
+'calculate solar position
+Call solarposition(lat, lon, curyear, curmonth, curday, curhh, curmm, curss, _
+                     timezone, dlstime, az, el, erv)
+
+'solar zenith in radians
+If el >= 0 Then
+ ZEN = degToRad(90 - el)
+Else
+ ZEN = degToRad(90)
+End If
+ZENDEG = radToDeg(ZEN)
+
+'calculate fraction of solar radiation reflected from the water surface
+'using Anderson (1954) as reported by Brown and Barnwell (1987) for QUAL2e
+If el > 0 Then
+ If cloudfrac < 0.1 Then
+  ALDO = 1.18 * el ^ -0.77
+ ElseIf cloudfrac >= 0.1 And cloudfrac < 0.5 Then
+  ALDO = 2.2 * el ^ -0.97
+ ElseIf cloudfrac >= 0.5 And cloudfrac < 0.9 Then
+  ALDO = 0.95 * el ^ -0.75
+ ElseIf cloudfrac >= 0.9 Then
+  ALDO = 0.35 * el ^ -0.45
+ End If
+Else
+ALDO = 0
+End If
+If ALDO < 0 Then ALDO = 0
+If ALDO > 1 Then ALDO = 1
+
+If Jsnt < 0 Then         'if input value of Jsnt is <0 then use the specified solar model to calculate
+ 
+      'gp optional solar radiation codes for clear sky
+      If JsntMethod = 0 Then           'use Chapra's QUAL2K method based on Bras
+         'use Bras solar method with NOAA/Meeus el and erv
+         If el <= 0 Then
+          Jsnt = 0
+         Else
+          Call BrasSolar(el, erv, nfac, Iclear)                                        'clear sky Iclear units of W/m^2
+          Jsnt = Iclear / (4.183076 * 100 * 100 / 86400)                               'convert from W/m^2 to cal/cm^2/d
+         End If
+ '     ElseIf JsntMethod = 1 Then           'use CE-EQUAL-W2 method:
+ '     'not used in ver 25
+ '            sinal = Sin(degToRad(el))     'use NOAA functions for for solar position
+ '            a0 = 57.2958 * Asin(sinal)
+ '            If a0 > 0# Then
+ '              SRO = 2.044 * a0 + 0.1296 * a0 ^ 2 - 0.001941 * a0 ^ 3 + 0.000007591 * a0 ^ 4
+ '              'gp  SRO = (1# - 0.65 * cc(i) ^ 2) * SRO * 24#
+ '              SRO = SRO * 24#     'gp moved cloud correction to below
+ '              SRO = SRO * 0.1314                              'BTU_FT2_DAY_TO_W_M2 = 0.1314
+ '              'gp SRO = SRO * (1# - 0.06)                     'adjust for reflection of REFL=0.06
+ '            Else
+ '              SRO = 0#
+ '              SRO = 0#
+ '            End If
+ '        Jsnt = SRO / (4.183076 * 100 * 100 / 86400)         'convert from W/m^2 to cal/cm^2/d
+ '        'save potential Jsnt (before shade or reflection) for output on diagnostic sheet
+ '        JsntPotential = Jsnt             'units of cal/cm^2/day
+      ElseIf JsntMethod = 2 Then    'use Bird and Hulstrom method with Bras/Qual2e/CE-QUAL-W2 cloud cover adjustment:
+         'use Bird solar model with NOAA/Meeus ZEN and erv
+         If el <= 0 Then
+          Jsnt = 0
+         Else
+          Call BirdAndHulstrom(curyear, jd, ZEN, erv, ETR, pressureMb, ozoneCm, waterCm, AOD500nm, AOD380nm, Ba, albedo, _
+                          directBeam, directHz, globalHz, diffuseHz)
+          'adjust convert to cal/cm^2/day
+          Jsnt = globalHz / (4.183076 * 100 * 100 / 86400)
+         End If
+'      ElseIf JsntMethod = 3 Then     'use HeatSource version 7 method
+'      'not used in ver 25
+'         If el > 0 Then
+'          Call hs7Solar(currentdatetime, dlstime, elevation, el, cloudfrac, Jsnt)
+'         Else
+'          Jsnt = 0
+'         End If
+'         'save potential Jsnt (before shade or reflection) for output on diagnostic sheet
+'         JsntPotential = Jsnt             'units of cal/cm^2/day
+      ElseIf JsntMethod = 4 Then     'use W2Met method
+         'use Ryan-Stolzenbach solar
+         If el <= 0 Then
+          Jsnt = 0
+         Else
+          Call RyanStolzSolar(el, erv, atc, elevation, Iclear)         'clear sky Iclear units of W/m^2
+          Jsnt = Iclear / (4.183076 * 100 * 100 / 86400)                               'convert from W/m^2 to cal/cm^2/d
+         End If
+'      ElseIf JsntMethod = 5 Then     'use Iqbal method programmed by Corripio
+'      'not used in ver 25
+'         If el > 0 Then
+'          Call AtmosTrans(ZENDEG, jd, elevation, visibility, RH(airtemp, dewpoint), airtemp + 273.15, ozoneCm, albedo, _
+'                          directHz, diffuseHz)
+'         Else
+'          directHz = 0
+'          diffuseHz = 0
+'         End If
+'         'convert to cal/cm^2/day
+'         Jsnt = (directHz + diffuseHz) / (4.183076 * 100 * 100 / 86400)
+'         'save potential Jsnt (before shade or reflection) for output on diagnostic sheet
+'         JsntPotential = Jsnt             'units of cal/cm^2/day
+      End If
+
+Else
+'use input value of Jsnt if present on 'input met data' sheet
+
+ Jsnt = Jsnt / (4.183076 * 100 * 100 / 86400)          'convert input of Jsnt from W/m^2 to cal/cm^2/day
+
+End If
+
+      'save potential Jsnt (before shade or reflection) for output on diagnostic sheet
+      JsntPotential = Jsnt             'units of cal/cm^2/day
+
+      'gp 13-Nov-2012
+      ''gp cloud cover correction for solar radiation
+      'If JsntMethCC = 1 Then           'WRE 1967 method documented in QUAL2E manual
+      '  Jsnt = Jsnt * (1 - 0.65 * cloudfrac ^ 2)
+      'End If
+      Jsnt = Jsnt * (1 - KCL1 * cloudfrac ^ KCL2)
+      
+      'save potential Jsnt after cloud correction for output on diagnostic sheet
+      JsntAfterCC = Jsnt             'units of cal/cm^2/day
+      
+      'gp add adjustment of Jsnt for effective shading from vegetation and topography and reflection
+      Jsnt = Jsnt * (1 - effectiveShade)
+      
+      'save potential Jsnt after shade for output on diagnostic sheet
+      JsntAfterCCandShade = Jsnt             'units of cal/cm^2/day
+      
+      'adjust for reflection if shade input is missing or zero:
+      Jsnt = Jsnt * (1 - ALDO)     'units of cal/cm^2/day
+      
+      es = esat(responseTemp)                           'sat'n vapor pressure of water surface temp (mm Hg)
+      eair = esat(dewpoint)                             'air vapor pressure (mm Hg)
+      
+      'gp optional fUw calculation methods
+      'Brady, Graves, and Geyer formula is from Chapra eqn 30.22
+      'the other formulas for fUw are from translated JEEAI's sub shesst for W2Met
+      If fUwMethod = 0 Then
+        '"Brady, Graves, and Geyer"
+        'convert to the formula's wind speed height using
+        'the exponential wind law, Paily et al., 1974
+        'for this formula the wind speed height is 7 m (see Edinger, et al., 1974)
+        fUw = 19 + 0.95 * Uw_7m ^ 2     'Chapra eqn 30.22 cal/cm^2/d/mmHg
+      ElseIf fUwMethod = 1 Then
+        '"Marciano and Harbeck", a.k.a, "Lake Hefner"
+        'for this formula the wind speed height is 7 m (see Edinger, et al., 1974)
+        'first convert windspeed from m s-1 to mph
+        wmph = Uw_7m * 3600# / (0.3048 * 5280#)     'Uw(i) is at 7m
+        'next compute fUw in W/m^2/mmHg
+        fUw = 0.1313 * 17# * wmph
+        'next convert fUw to cal/cm^2/d/mmHg
+        fUw = fUw / (4.183076 * 100 * 100 / 86400)
+      ElseIf fUwMethod = 2 Then
+        '"Ryan-Harleman"
+        'for this formula the wind speed height is 2m
+        'first convert windspeed from m s-1 to mph
+        wmph = Uw_2m * 3600# / (0.3048 * 5280#)     'Uw(i) is at 7m
+        'convert to the formula's wind speed height using
+        'the exponential wind law, Paily et al., 1974
+        'wmph = wmph * (2 / windHeight) ^ 0.15                'convert wind speed from 7m to 2m height
+        'next compute virtual temperature difference
+        'eagleson, p. s.  1970.  dynamic hydrology.  mcgraw-hill, inc.,
+        'new york, new york. p. 56
+        ta2a = 9# / 5# * airtemp + 32#               'deg F air temp at 2m
+        tva = ta2a / (1# - 0.378 * (eair / 760))
+        tsa = 9# / 5# * responseTemp + 32#
+        tvs = tsa / (1# - 0.378 * (es / 760))
+        dtv = tvs - tva     'original formula in shestt
+        If dtv < 0 Then dtv = 0
+        'next compute fUw in W/m^2/mmHg
+        fUw = 0.1313 * (14# * wmph + 22.4 * dtv ^ (1# / 3#))
+        'next convert fUw to cal/cm^2/d/mmHg
+        fUw = fUw / (4.183076 * 100 * 100 / 86400)
+'gp East Mesa 1 not available in rTemp because it is based on waterbody total area
+'      ElseIf fUwMethod = 3 Then
+'        '"East Mesa"
+'        'from adams, et al., eq. 4.48, p. 4-26
+'        'for this formula the wind speed height is 2m
+'        'first convert windspeed from m s-1 to mph
+'        wmph = Uw_2m * 3600# / (0.3048 * 5280#)     'Uw(i) is at 7m
+'        'convert to the formula's wind speed height using
+'        'the exponential wind law, Paily et al., 1974
+'        'wmph = wmph * (2 / windHeight) ^ 0.15                'convert wind speed from 7m to 2m height
+'        'convert area in m^2 to area in acres
+'        areaa = Asf / (0.3048 ^ 2 * 43560#)
+'        'next compute virtual temperature difference
+'        'eagleson, p. s.  1970.  dynamic hydrology.  mcgraw-hill, inc.,
+'        'new york, new york. p. 56
+'        ta2a = 9# / 5# * airtemp + 32#               'deg F air temp at 2m
+'        tva = ta2a / (1# - 0.378 * (eair / 760))
+'        tsa = 9# / 5# * responseTemp + 32#
+'        tvs = tsa / (1# - 0.378 * (es / 760))
+'        dtv = tvs - tva     'original formula in shestt
+'        If dtv < 0 Then dtv = 0
+'        'next compute fUw in W/m^2/mmHg
+'        fUw = 0.1313 * ((22.4 * dtv ^ (1# / 3#)) ^ 2 + (24.2 * areaa ^ (-0.05) * wmph) ^ 2) ^ 0.5
+'        'next convert fUw to cal/cm^2/d/mmHg
+'        fUw = fUw / (4.183076 * 100 * 100 / 86400)
+      ElseIf fUwMethod = 4 Then
+        '!"East Mesa modified to include Marciano and Harbeck"
+        '!from adams, et al., eq. 4.48, p. 4-26
+        'for this formula the wind speed height is 2m
+        'first convert windspeed from m s-1 to mph
+        wmph = Uw_2m * 3600# / (0.3048 * 5280#)     'Uw(i) is at 7m
+        'convert to the formula's wind speed height using
+        'the exponential wind law, Paily et al., 1974
+        'wmph = wmph * (2 / windHeight) ^ 0.15                'convert wind speed from 7m to 2m height
+        'next compute virtual temperature difference
+        'eagleson, p. s.  1970.  dynamic hydrology.  mcgraw-hill, inc.,
+        'new york, new york. p. 56
+        ta2a = 9# / 5# * airtemp + 32#               'deg F air temp at 2m
+        tva = ta2a / (1# - 0.378 * (eair / 760))
+        tsa = 9# / 5# * responseTemp + 32#
+        tvs = tsa / (1# - 0.378 * (es / 760))
+        dtv = tvs - tva     'original formula in shestt
+        If dtv < 0 Then dtv = 0
+        'next compute fUw in W/m^2/mmHg
+        fUw = 0.1313 * ((22.4 * dtv ^ (1# / 3#)) ^ 2 + (17# * wmph) ^ 2) ^ 0.5
+        'next convert fUw to cal/cm^2/d/mmHg
+        fUw = fUw / (4.183076 * 100 * 100 / 86400)
+'gp Harbeck not available in rTemp because it is based on waterbody total area
+'      ElseIf fUwMethod = 5 Then
+'        '"Harbeck 1962"
+'        'first convert windspeed from m s-1 to mph
+'        wmph = Uw_2m * 3600# / (0.3048 * 5280#)     'Uw(i) is at 7m
+'        'convert to the formula's wind speed height using
+'        'the exponential wind law, Paily et al., 1974
+'        'wmph = wmph * (2 / windHeight) ^ 0.15                'convert wind speed from 7m to 2m height
+'        'convert area in m^2 to area in acres
+'        areaa = Asf / (0.3048 ^ 2 * 43560#)
+'        'next compute fUw in W/m^2/mmHg
+'        fUw = 0.1313 * 24.2 * areaa ^ (-0.05) * wmph
+'        'next convert fUw to cal/cm^2/d/mmHg
+'        fUw = fUw / (4.183076 * 100 * 100 / 86400)
+      ElseIf fUwMethod = 6 Then
+        '"Helfrich et al" is recalibrated "Ryan-Harleman"
+        'per Shanahan 1984 (EPA-600/9-85-003)
+        'for this formula the wind speed height is 2m
+        'first convert windspeed from m s-1 to mph
+        wmph = Uw_2m * 3600# / (0.3048 * 5280#)     'Uw(i) is at 7m
+        'convert to the formula's wind speed height using
+        'the exponential wind law, Paily et al., 1974
+        'wmph = wmph * (2 / windHeight) ^ 0.15                'convert wind speed from 7m to 2m height
+        'next compute virtual temperature difference
+        'eagleson, p. s.  1970.  dynamic hydrology.  mcgraw-hill, inc.,
+        'new york, new york. p. 56
+        ta2a = 9# / 5# * airtemp + 32#               'deg F air temp at 2m
+        tva = ta2a / (1# - 0.378 * (eair / 760))
+        tsa = 9# / 5# * responseTemp + 32#
+        tvs = tsa / (1# - 0.378 * (es / 760))
+        dtv = tvs - tva     'original formula in shestt
+        If dtv < 0 Then dtv = 0
+        'next compute fUw in W/m^2/mmHg
+        fUw = 0.1313 * (11.1 * wmph + 17.7 * dtv ^ (1# / 3#))
+        'next convert fUw to cal/cm^2/d/mmHg
+        fUw = fUw / (4.183076 * 100 * 100 / 86400)
+      End If
+      
+      evap = -fUw * (es - eair)                         'evaporation heat flux (cal/cm^2/d)
+      conv = -Bowen * fUw * (responseTemp - airtemp)     'air convection/conduction (cal/cm^2/d)
+      back = -eps * sigma * (responseTemp + 273.15) ^ 4  'longwave back radiation from water (cal/cm^2/d)
+
+      'gp optional longwave emissivity calculation methods for clear sky
+      'gp longat = sigma * (Ta(i) + 273.15) ^ 4 * (Acoeff + 0.031 * Sqr(eair)) * (1 - RL)
+      If longatMethod = 0 Then           'Brunt 1932 method used by Qual2k method from Chapra eqn 30.19
+        emissivity = (Acoeff + 0.031 * Sqr(eair))
+      ElseIf longatMethod = 1 Then       'Brutsaert 1982
+        
+        'gp 13-Nov-2012
+        'emissivity = 1.24 * (10 * 0.1333224 * eair / (airtemp + 273.15)) ^ (1 / 7)
+        emissivity = kbrut * (10# * 0.1333224 * eair / (airtemp + 273.15)) ^ (1# / 7#)
+      
+      ElseIf longatMethod = 2 Then       'Satterlund 1979
+        emissivity = 1.08 * (1 - Exp(-(10 * 0.1333224 * eair) ^ ((airtemp + 273.15) / 2016)))
+      ElseIf longatMethod = 3 Then       'Idso and Jackson 1969
+        emissivity = 1 - 0.261 * Exp(-0.000777 * airtemp ^ 2)
+      ElseIf longatMethod = 4 Then       'Swinbank 1963
+        emissivity = 0.0000092 * (airtemp + 273.15) ^ 2
+      ElseIf longatMethod = 5 Then       'Koberg 1964
+        
+        'gp 13-Nov-2012
+        'emissivity = (Aa(airtemp, (1 - 0.65 * cloudfrac ^ 2)) + 0.0263 * Sqr(1.333224 * eair))
+        emissivity = (Aa(airtemp, (1 - KCL1 * cloudfrac ^ KCL2)) + 0.0263 * Sqr(1.333224 * eair))
+      
+      End If
+        
+      'gp 13-Nov-2012
+      ''gp cloud cover correction for emmissivity
+      'If longatMethod <> 5 Then     'Koberg method includes cloud adustment
+      '  If longatMethCC = 1 Then           'Anderson 1954 Lake Hefner
+      '    emissivity = emissivity * (1 + 0.17 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 2 Then       'Brutsaert 1982 average of all cloud types reported by Bolz 1949
+      '    emissivity = emissivity * (1 + 0.22 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 3 Then       'Bolz 1949 cirrus clouds
+      '    emissivity = emissivity * (1 + 0.04 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 4 Then       'Bolz 1949 cirrostratus clouds
+      '    emissivity = emissivity * (1 + 0.08 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 5 Then       'Bolz 1949 altocumulus clouds
+      '    emissivity = emissivity * (1 + 0.17 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 6 Then       'Bolz 1949 altostratus, cumulonimbus, and cumulus clouds
+      '    emissivity = emissivity * (1 + 0.2 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 7 Then       'Bolz 1949 stratocumulus clouds
+      '    emissivity = emissivity * (1 + 0.22 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 8 Then       'Bolz 1949 nimbostratus clouds
+      '    emissivity = emissivity * (1 + 0.25 * cloudfrac ^ 2)
+      '  ElseIf longatMethCC = 9 Then       'Bolz 1949 fog
+      '    emissivity = emissivity * (1 + 0.25 * cloudfrac ^ 2)
+      '  End If
+      'End If
+      ''gp downwelling longwave atmospheric flux (cal/cm^2/d)
+      'longat = sigma * (airtemp + 273.15) ^ 4 * emissivity * (1 - RL)
+      If longatMethod = 5 Then  'Koberg
+        'Koberg method already includes cloud adjustment so no further adjustment is done
+        longat = sigma * (airtemp + 273.15) ^ 4# * emissivity
+      Else
+        'cloudy sky adjustment of downwelling longwave atmospheric
+        Select Case longcloudMethod
+          'See Table 3 in Choi et al 2008 for explanation and suggested parameters KCL3 and KCL4
+          'http://www.unh.edu/erg/faculty/Jacobs/publications/new/choi_et_al_08_1.pdf
+          Case "Eqn 1"
+            longat = sigma * (airtemp + 273.15) ^ 4# * emissivity * (1# + KCL3 * cloudfrac ^ KCL4)
+          Case "Eqn 2"
+            longat = sigma * (airtemp + 273.15) ^ 4# * emissivity * (1# - cloudfrac ^ KCL4) _
+                     + KCL3 * cloudfrac ^ KCL4 * sigma * (airtemp + 273.15) ^ 4#
+        End Select
+      End If
+      'adjust longat for reflection from water surface(assumed RL=0.03)
+      longat = longat * (1# - RL)
+      
+'sediment-water conduction and hyporheic exchange heat flux from sediments into the water in units of cal/cm2/day
+      'note: average conduction length for sediment-water heat flux is assumed to equal Hsed/2
+      Jsedcond = (Tsed - responseTemp) * 86400 * 2 * sedThermCond / Hsed                        'units of cal/cm2/day
+      Jhyporheic = (Tsed - responseTemp) * rhow * Cpw * HyporheicExchange * 100                 'units of cal/cm2/day
+      
+'net groundwater heat flux into the surface water:
+      Jgroundwater = (groundwaterTemp - responseTemp) * rhow * Cpw * groundwaterInflow * 100    'units of cal/cm2/day
+
+'write results in output sheet
+If i = 1 Or timestep > 0 Then        'test to write output for first row or if timestep > 0 to skip over duplicate input data
+Sheets("output").Select
+ ActiveCell.Value = currentdatetime
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = az
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = el
+
+'potential solar rad at ground surface before shade and reflection
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = JsntPotential * (4.183076 * 100 * 100 / 86400)           'W/m^2
+
+'output of heat fluxes converted to W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Jsnt * (4.183076 * 100 * 100 / 86400)           'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = longat * (4.183076 * 100 * 100 / 86400)         'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = back * (4.183076 * 100 * 100 / 86400)           'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = conv * (4.183076 * 100 * 100 / 86400)           'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = evap * (4.183076 * 100 * 100 / 86400)           'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Jsedcond * (4.183076 * 100 * 100 / 86400)       'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Jhyporheic * (4.183076 * 100 * 100 / 86400)     'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Jgroundwater * (4.183076 * 100 * 100 / 86400)   'W/m^2
+ 
+If i > 1 And timestep <= (4 / 24) Then
+'update the response temperature using the change in water and sediment temperature (dTe and dTs) calculated prior to the time step
+ responseTemp = responseTemp + dTe * timestep
+ Tsed = Tsed + dTs * timestep
+End If
+If responseTemp < responseTempMin Then responseTemp = responseTempMin
+If Tsed < responseTempMin Then Tsed = responseTempMin
+
+'test for model stability
+If responseTemp > 0 And TeStab > 0 Then
+  'If Abs((responseTemp - TeStab) / responseTemp) > 0.25 Then
+  If Abs(responseTemp - TeStab) > StabTestCriteria Then
+    'MsgBox "Model temperature is unstable. Try using a smaller time step between meteorological input values. Temperature change during the last time step = " & Int(Abs((responseTemp - TeStab) / responseTemp) * 100) & "%"
+    MsgBox "Model temperature is unstable. Try using a smaller time step between meteorological input values. Temperature change during the last time step = " & Int(Abs(responseTemp - TeStab) * 100) / 100 & " deg C. A useful program that can be used to resample the met data at a smaller time step is JEEAI's TVDS program available at http://www.jeeai.com/downloads.htm#software"
+    Sheets("input met data").Select
+    'Range("b3").Select
+    End
+  End If
+End If
+TeStab = responseTemp
+
+'calculate the change in response water and sediment temperatures in deg C per day for next timestep
+dTe = (Jsnt + longat + back + conv + evap + Jsedcond + Jhyporheic + Jgroundwater) / (rhow * Cpw * waterDepth * 100)
+dTs = -(Jsedcond + Jhyporheic) / (rhoCpSed * Hsed)
+  
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = airtemp       'deg C
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = dewpoint      'deg C
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = responseTemp  'deg C
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Tsed          'deg C per day
+ ActiveCell.Offset(1, -15).Select
+ 
+'diagnostic output
+If writeDiagnostic = 1 Then
+ Sheets("diagnostic").Select
+ ActiveCell.Value = currentdatetime
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = lat
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = lon
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = timezone
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = dlstime
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = nfac
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = responseTempInit
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = responseTempMin
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = waterDepth
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = effectiveShade
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = windHeight
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = effectiveWind
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = groundwaterTemp
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = groundwaterInflow
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = sedThermCond   'units of (cal/sec) per (cm deg C)
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = sedThermDiff   'units of cm^2/sec
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = rhoCpSed       'units of cal/cm^3/deg C
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Hsed
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = HyporheicExchange
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = JsntMethod
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = longatMethod
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Uw
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Uw_2m
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Uw_7m
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = Uw_10m
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = trise
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = tset
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = ALDO
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = es
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = eair
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = fUw
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = dTe
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = dTs
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = timestep
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = emissivity
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = JsntPotential * (4.183076 * 100 * 100 / 86400)          'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = JsntAfterCC * (4.183076 * 100 * 100 / 86400)          'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = JsntAfterCCandShade * (4.183076 * 100 * 100 / 86400)          'W/m^2
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = elevation
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = cloudfrac
+ 
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = tva
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = tvs
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = dtv
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = fUw
+ 
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = JsntMethCC
+ ActiveCell.Offset(0, 1).Select
+ ActiveCell.Value = 1 - 0.65 * cloudfrac ^ 2
+ 
+ 
+ ActiveCell.Offset(1, -39 - 4 - 2).Select
+End If
+ 
+End If     'end test to write output if timestep > 0
+
+'gp 13-Nov-2012
+''update the progress bar
+'pctComplete = (i / npt) * 100
+'sb.PercentComplete = pctComplete ' update the progress bar
+'If pctComplete > 5 And pct05 = 0 Then
+'        sb.PostMessage = "5% complete"
+'        pct05 = 1
+'End If
+'If pctComplete > 10 And pct10 = 0 Then
+'        sb.PostMessage = "10% complete"
+'        pct10 = 1
+'End If
+'If pctComplete > 15 And pct15 = 0 Then
+'        sb.PostMessage = "15% complete"
+'        pct15 = 1
+'End If
+'If pctComplete > 20 And pct20 = 0 Then
+'        sb.PostMessage = "20% complete"
+'        pct20 = 1
+'End If
+'If pctComplete > 25 And pct25 = 0 Then
+'        sb.PostMessage = "25% complete"
+'        pct25 = 1
+'End If
+'If pctComplete > 30 And pct30 = 0 Then
+'        sb.PostMessage = "30% complete"
+'        pct30 = 1
+'End If
+'If pctComplete > 35 And pct35 = 0 Then
+'        sb.PostMessage = "35% complete"
+'        pct35 = 1
+'End If
+'If pctComplete > 40 And pct40 = 0 Then
+'        sb.PostMessage = "40% complete"
+'        pct40 = 1
+'End If
+'If pctComplete > 45 And pct45 = 0 Then
+'        sb.PostMessage = "45% complete"
+'        pct45 = 1
+'End If
+'If pctComplete > 50 And pct50 = 0 Then
+'        sb.PostMessage = "50% complete"
+'        pct50 = 1
+'End If
+'If pctComplete > 55 And pct55 = 0 Then
+'        sb.PostMessage = "55% complete"
+'        pct55 = 1
+'End If
+'If pctComplete > 60 And pct60 = 0 Then
+'        sb.PostMessage = "60% complete"
+'        pct60 = 1
+'End If
+'If pctComplete > 65 And pct65 = 0 Then
+'        sb.PostMessage = "65% complete"
+'        pct65 = 1
+'End If
+'If pctComplete > 70 And pct70 = 0 Then
+'        sb.PostMessage = "70% complete"
+'        pct70 = 1
+'End If
+'If pctComplete > 75 And pct75 = 0 Then
+'        sb.PostMessage = "75% complete"
+'        pct75 = 1
+'End If
+'If pctComplete > 80 And pct80 = 0 Then
+'        sb.PostMessage = "80% complete"
+'        pct80 = 1
+'End If
+'If pctComplete > 85 And pct85 = 0 Then
+'        sb.PostMessage = "85% complete"
+'        pct85 = 1
+'End If
+'If pctComplete > 90 And pct90 = 0 Then
+'        sb.PostMessage = "90% complete"
+'        pct90 = 1
+'End If
+'If pctComplete > 95 And pct95 = 0 Then
+'        sb.PostMessage = "95% complete"
+'        pct95 = 1
+'End If
+pctComplete = (i / npt) * 100
+If pctComplete > 5 And pct05 = 0 Then
+  Application.StatusBar = "5% complete"
+  pct05 = 1
+End If
+If pctComplete > 10 And pct10 = 0 Then
+  Application.StatusBar = "10% complete"
+  pct10 = 1
+End If
+If pctComplete > 15 And pct15 = 0 Then
+  Application.StatusBar = "15% complete"
+  pct15 = 1
+End If
+If pctComplete > 20 And pct20 = 0 Then
+  Application.StatusBar = "20% complete"
+  pct20 = 1
+End If
+If pctComplete > 25 And pct25 = 0 Then
+  Application.StatusBar = "25% complete"
+  pct25 = 1
+End If
+If pctComplete > 30 And pct30 = 0 Then
+  Application.StatusBar = "30% complete"
+  pct30 = 1
+End If
+If pctComplete > 35 And pct35 = 0 Then
+  Application.StatusBar = "35% complete"
+  pct35 = 1
+End If
+If pctComplete > 40 And pct40 = 0 Then
+  Application.StatusBar = "40% complete"
+  pct40 = 1
+End If
+If pctComplete > 45 And pct45 = 0 Then
+  Application.StatusBar = "45% complete"
+  pct45 = 1
+End If
+If pctComplete > 50 And pct50 = 0 Then
+  Application.StatusBar = "50% complete"
+  pct50 = 1
+End If
+If pctComplete > 55 And pct55 = 0 Then
+  Application.StatusBar = "55% complete"
+  pct55 = 1
+End If
+If pctComplete > 60 And pct60 = 0 Then
+  Application.StatusBar = "60% complete"
+  pct60 = 1
+End If
+If pctComplete > 65 And pct65 = 0 Then
+  Application.StatusBar = "65% complete"
+  pct65 = 1
+End If
+If pctComplete > 70 And pct70 = 0 Then
+  Application.StatusBar = "70% complete"
+  pct70 = 1
+End If
+If pctComplete > 75 And pct75 = 0 Then
+  Application.StatusBar = "75% complete"
+  pct75 = 1
+End If
+If pctComplete > 80 And pct80 = 0 Then
+  Application.StatusBar = "80% complete"
+  pct80 = 1
+End If
+If pctComplete > 85 And pct85 = 0 Then
+  Application.StatusBar = "85% complete"
+  pct85 = 1
+End If
+If pctComplete > 90 And pct90 = 0 Then
+  Application.StatusBar = "90% complete"
+  pct90 = 1
+End If
+If pctComplete > 95 And pct95 = 0 Then
+  Application.StatusBar = "95% complete"
+  pct95 = 1
+End If
+
+Next i
+  
+'gp 13-Nov-2012
+''remove the progress bar
+'    Set sb = Nothing ' remove the progress bar
+Application.StatusBar = "Ready"
+
+Sheets("input site data").Select
+Range("b3").Select
+Sheets("input met data").Select
+Range("a2").Select
+ActiveCell.Offset(1, 0).Select
+Sheets("input thermograph data").Select
+Range("a2").Select
+ActiveCell.Offset(1, 0).Select
+Sheets("warnings").Select
+Range("a1").Select
+ActiveCell.Offset(1, 0).Select
+Sheets("output").Select
+Range("a2").Select
+ActiveCell.Offset(1, 0).Select
+Sheets("diagnostic").Select
+Range("a1").Select
+ActiveCell.Offset(1, 0).Select
+
+If writeDiagnostic = 0 Then
+ Sheets("diagnostic").Visible = False
+End If
+
+Sheets("output chart response").Select
+Application.ScreenUpdating = True
+
+
+End Sub
+
+
+
+Function radToDeg(angleRad)
+'// Convert radian angle to degrees
+
+        radToDeg = (180# * angleRad / Application.WorksheetFunction.Pi())
+
+End Function
+
+
+Function degToRad(angleDeg)
+'// Convert degree angle to radians
+        
+        degToRad = (Application.WorksheetFunction.Pi() * angleDeg / 180#)
+        
+End Function
+
+
+Function calcJD(year, month, day)
+
+'***********************************************************************/
+'* Name:    calcJD
+'* Type:    Function
+'* Purpose: Julian day from calendar day
+'* Arguments:
+'*   year : 4 digit year
+'*   month: January = 1
+'*   day  : 1 - 31
+'* Return value:
+'*   The Julian day corresponding to the date
+'* Note:
+'*   Number is returned for start of day.  Fractional days should be
+'*   added later.
+'***********************************************************************/
+
+Dim a As Double, b As Double, jd As Double
+
+        If (month <= 2) Then
+         year = year - 1
+         month = month + 12
+        End If
+        
+        a = Application.WorksheetFunction.Floor(year / 100, 1)
+        b = 2 - a + Application.WorksheetFunction.Floor(a / 4, 1)
+
+        jd = Application.WorksheetFunction.Floor(365.25 * (year + 4716), 1) + _
+             Application.WorksheetFunction.Floor(30.6001 * (month + 1), 1) + day + b - 1524.5
+        calcJD = jd
+    
+'gp put the year and month back where they belong
+        If month = 13 Then
+         month = 1
+         year = year + 1
+        End If
+        If month = 14 Then
+         month = 2
+         year = year + 1
+        End If
+        
+End Function
+
+
+Function calcTimeJulianCent(jd)
+
+'***********************************************************************/
+'* Name:    calcTimeJulianCent
+'* Type:    Function
+'* Purpose: convert Julian Day to centuries since J2000.0.
+'* Arguments:
+'*   jd : the Julian Day to convert
+'* Return value:
+'*   the T value corresponding to the Julian Day
+'***********************************************************************/
+
+Dim t As Double
+
+        t = (jd - 2451545#) / 36525#
+        calcTimeJulianCent = t
+
+End Function
+
+
+Function calcJDFromJulianCent(t)
+
+'***********************************************************************/
+'* Name:    calcJDFromJulianCent
+'* Type:    Function
+'* Purpose: convert centuries since J2000.0 to Julian Day.
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   the Julian Day corresponding to the t value
+'***********************************************************************/
+
+Dim jd As Double
+
+        jd = t * 36525# + 2451545#
+        calcJDFromJulianCent = jd
+
+End Function
+
+
+Function calcGeomMeanLongSun(t)
+
+'***********************************************************************/
+'* Name:    calGeomMeanLongSun
+'* Type:    Function
+'* Purpose: calculate the Geometric Mean Longitude of the Sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   the Geometric Mean Longitude of the Sun in degrees
+'***********************************************************************/
+
+Dim l0 As Double
+
+        l0 = 280.46646 + t * (36000.76983 + 0.0003032 * t)
+        Do
+           If (l0 <= 360) And (l0 >= 0) Then Exit Do
+           If l0 > 360 Then l0 = l0 - 360
+           If l0 < 0 Then l0 = l0 + 360
+        Loop
+        
+        calcGeomMeanLongSun = l0
+
+End Function
+
+
+Function calcGeomMeanAnomalySun(t)
+
+'***********************************************************************/
+'* Name:    calGeomAnomalySun
+'* Type:    Function
+'* Purpose: calculate the Geometric Mean Anomaly of the Sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   the Geometric Mean Anomaly of the Sun in degrees
+'***********************************************************************/
+    
+Dim m As Double
+    
+        m = 357.52911 + t * (35999.05029 - 0.0001537 * t)
+        calcGeomMeanAnomalySun = m
+        
+End Function
+        
+
+Function calcEccentricityEarthOrbit(t)
+
+'***********************************************************************/
+'* Name:    calcEccentricityEarthOrbit
+'* Type:    Function
+'* Purpose: calculate the eccentricity of earth's orbit
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   the unitless eccentricity
+'***********************************************************************/
+
+Dim e As Double
+
+        e = 0.016708634 - t * (0.000042037 + 0.0000001267 * t)
+        calcEccentricityEarthOrbit = e
+        
+End Function
+
+
+Function calcSunEqOfCenter(t)
+
+'***********************************************************************/
+'* Name:    calcSunEqOfCenter
+'* Type:    Function
+'* Purpose: calculate the equation of center for the sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   in degrees
+'***********************************************************************/
+
+Dim m As Double, mrad As Double, sinm As Double, sin2m As Double, sin3m As Double
+Dim c As Double
+
+        m = calcGeomMeanAnomalySun(t)
+
+        mrad = degToRad(m)
+        sinm = Sin(mrad)
+        sin2m = Sin(mrad + mrad)
+        sin3m = Sin(mrad + mrad + mrad)
+
+        c = sinm * (1.914602 - t * (0.004817 + 0.000014 * t)) _
+            + sin2m * (0.019993 - 0.000101 * t) + sin3m * 0.000289
+        
+        calcSunEqOfCenter = c
+        
+End Function
+
+
+Function calcSunTrueLong(t)
+
+'***********************************************************************/
+'* Name:    calcSunTrueLong
+'* Type:    Function
+'* Purpose: calculate the true longitude of the sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   sun's true longitude in degrees
+'***********************************************************************/
+
+Dim l0 As Double, c As Double, O As Double
+
+        l0 = calcGeomMeanLongSun(t)
+        c = calcSunEqOfCenter(t)
+
+        O = l0 + c
+        calcSunTrueLong = O
+        
+End Function
+
+
+Function calcSunTrueAnomaly(t)
+
+'***********************************************************************/
+'* Name:    calcSunTrueAnomaly (not used by sunrise, solarnoon, sunset)
+'* Type:    Function
+'* Purpose: calculate the true anamoly of the sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   sun's true anamoly in degrees
+'***********************************************************************/
+
+Dim m As Double, c As Double, v As Double
+
+        m = calcGeomMeanAnomalySun(t)
+        c = calcSunEqOfCenter(t)
+
+        v = m + c
+        calcSunTrueAnomaly = v
+        
+End Function
+
+
+Function calcSunRadVector(t)
+
+'***********************************************************************/
+'* Name:    calcSunRadVector (not used by sunrise, solarnoon, sunset)
+'* Type:    Function
+'* Purpose: calculate the distance to the sun in AU
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   sun radius vector in AUs
+'***********************************************************************/
+
+Dim v As Double, e As Double, R As Double
+
+        v = calcSunTrueAnomaly(t)
+        e = calcEccentricityEarthOrbit(t)
+ 
+        R = (1.000001018 * (1 - e * e)) / (1 + e * Cos(degToRad(v)))
+        calcSunRadVector = R
+        
+End Function
+
+
+Function calcSunApparentLong(t)
+
+'***********************************************************************/
+'* Name:    calcSunApparentLong (not used by sunrise, solarnoon, sunset)
+'* Type:    Function
+'* Purpose: calculate the apparent longitude of the sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   sun's apparent longitude in degrees
+'***********************************************************************/
+
+Dim O As Double, omega As Double, lambda As Double
+
+        O = calcSunTrueLong(t)
+
+        omega = 125.04 - 1934.136 * t
+        lambda = O - 0.00569 - 0.00478 * Sin(degToRad(omega))
+        calcSunApparentLong = lambda
+
+End Function
+
+
+Function calcMeanObliquityOfEcliptic(t)
+
+'***********************************************************************/
+'* Name:    calcMeanObliquityOfEcliptic
+'* Type:    Function
+'* Purpose: calculate the mean obliquity of the ecliptic
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   mean obliquity in degrees
+'***********************************************************************/
+
+Dim seconds As Double, e0 As Double
+
+        seconds = 21.448 - t * (46.815 + t * (0.00059 - t * (0.001813)))
+        e0 = 23# + (26# + (seconds / 60#)) / 60#
+        calcMeanObliquityOfEcliptic = e0
+        
+End Function
+    
+
+Function calcObliquityCorrection(t)
+
+'***********************************************************************/
+'* Name:    calcObliquityCorrection
+'* Type:    Function
+'* Purpose: calculate the corrected obliquity of the ecliptic
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   corrected obliquity in degrees
+'***********************************************************************/
+
+Dim e0 As Double, omega As Double, e As Double
+
+        e0 = calcMeanObliquityOfEcliptic(t)
+
+        omega = 125.04 - 1934.136 * t
+        e = e0 + 0.00256 * Cos(degToRad(omega))
+        calcObliquityCorrection = e
+        
+End Function
+        
+
+Function calcSunRtAscension(t)
+
+'***********************************************************************/
+'* Name:    calcSunRtAscension (not used by sunrise, solarnoon, sunset)
+'* Type:    Function
+'* Purpose: calculate the right ascension of the sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   sun's right ascension in degrees
+'***********************************************************************/
+
+Dim e As Double, lambda As Double, tananum As Double, tanadenom As Double
+Dim alpha As Double
+
+        e = calcObliquityCorrection(t)
+        lambda = calcSunApparentLong(t)
+ 
+        tananum = (Cos(degToRad(e)) * Sin(degToRad(lambda)))
+        tanadenom = (Cos(degToRad(lambda)))
+
+'original NOAA code using javascript Math.Atan2(y,x) convention:
+'        var alpha = radToDeg(Math.atan2(tananum, tanadenom));
+'        alpha = radToDeg(Application.WorksheetFunction.Atan2(tananum, tanadenom))
+
+'translated using Excel VBA Application.WorksheetFunction.Atan2(x,y) convention:
+        alpha = radToDeg(Application.WorksheetFunction.Atan2(tanadenom, tananum))
+        
+        calcSunRtAscension = alpha
+
+End Function
+
+
+Function calcSunDeclination(t)
+
+'***********************************************************************/
+'* Name:    calcSunDeclination
+'* Type:    Function
+'* Purpose: calculate the declination of the sun
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   sun's declination in degrees
+'***********************************************************************/
+
+Dim e As Double, lambda As Double, sint As Double, theta As Double
+
+        e = calcObliquityCorrection(t)
+        lambda = calcSunApparentLong(t)
+
+        sint = Sin(degToRad(e)) * Sin(degToRad(lambda))
+        theta = radToDeg(Application.WorksheetFunction.Asin(sint))
+        calcSunDeclination = theta
+
+End Function
+
+
+Function calcEquationOfTime(t)
+
+'***********************************************************************/
+'* Name:    calcEquationOfTime
+'* Type:    Function
+'* Purpose: calculate the difference between true solar time and mean
+'*     solar time
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'* Return value:
+'*   equation of time in minutes of time
+'***********************************************************************/
+
+Dim epsilon As Double, l0 As Double, e As Double, m As Double
+Dim y As Double, sin2l0 As Double, sinm As Double
+Dim cos2l0 As Double, sin4l0 As Double, sin2m As Double, Etime As Double
+
+        epsilon = calcObliquityCorrection(t)
+        l0 = calcGeomMeanLongSun(t)
+        e = calcEccentricityEarthOrbit(t)
+        m = calcGeomMeanAnomalySun(t)
+
+        y = Tan(degToRad(epsilon) / 2#)
+        y = y ^ 2
+
+        sin2l0 = Sin(2# * degToRad(l0))
+        sinm = Sin(degToRad(m))
+        cos2l0 = Cos(2# * degToRad(l0))
+        sin4l0 = Sin(4# * degToRad(l0))
+        sin2m = Sin(2# * degToRad(m))
+
+        Etime = y * sin2l0 - 2# * e * sinm + 4# * e * y * sinm * cos2l0 _
+                - 0.5 * y * y * sin4l0 - 1.25 * e * e * sin2m
+
+        calcEquationOfTime = radToDeg(Etime) * 4#
+        
+End Function
+    
+    
+Function calcHourAngleSunrise(lat, SolarDec)
+
+'***********************************************************************/
+'* Name:    calcHourAngleSunrise
+'* Type:    Function
+'* Purpose: calculate the hour angle of the sun at sunrise for the
+'*         latitude
+'* Arguments:
+'*   lat : latitude of observer in degrees
+'* solarDec : declination angle of sun in degrees
+'* Return value:
+'*   hour angle of sunrise in radians
+'***********************************************************************/
+
+Dim latrad As Double, sdRad As Double, HAarg As Double, HA As Double
+
+        latrad = degToRad(lat)
+        sdRad = degToRad(SolarDec)
+
+        HAarg = (Cos(degToRad(90.833)) / (Cos(latrad) * Cos(sdRad)) - Tan(latrad) * Tan(sdRad))
+
+        HA = (Application.WorksheetFunction.Acos(Cos(degToRad(90.833)) _
+              / (Cos(latrad) * Cos(sdRad)) - Tan(latrad) * Tan(sdRad)))
+
+        calcHourAngleSunrise = HA
+        
+End Function
+
+
+Function calcHourAngleSunset(lat, SolarDec)
+
+'***********************************************************************/
+'* Name:    calcHourAngleSunset
+'* Type:    Function
+'* Purpose: calculate the hour angle of the sun at sunset for the
+'*         latitude
+'* Arguments:
+'*   lat : latitude of observer in degrees
+'* solarDec : declination angle of sun in degrees
+'* Return value:
+'*   hour angle of sunset in radians
+'***********************************************************************/
+
+Dim latrad As Double, sdRad As Double, HAarg As Double, HA As Double
+
+        latrad = degToRad(lat)
+        sdRad = degToRad(SolarDec)
+
+        HAarg = (Cos(degToRad(90.833)) / (Cos(latrad) * Cos(sdRad)) - Tan(latrad) * Tan(sdRad))
+
+        HA = (Application.WorksheetFunction.Acos(Cos(degToRad(90.833)) _
+               / (Cos(latrad) * Cos(sdRad)) - Tan(latrad) * Tan(sdRad)))
+
+        calcHourAngleSunset = -HA
+        
+End Function
+
+
+Function calcSunriseUTC(jd, Latitude, longitude)
+
+'***********************************************************************/
+'* Name:    calcSunriseUTC
+'* Type:    Function
+'* Purpose: calculate the Universal Coordinated Time (UTC) of sunrise
+'*         for the given day at the given location on earth
+'* Arguments:
+'*   JD  : julian day
+'*   latitude : latitude of observer in degrees
+'*   longitude : longitude of observer in degrees
+'* Return value:
+'*   time in minutes from zero Z
+'***********************************************************************/
+
+Dim t As Double, eqtime As Double, SolarDec As Double, hourangle As Double
+Dim delta As Double, timeDiff As Double, timeUTC As Double
+Dim newt As Double
+
+        t = calcTimeJulianCent(jd)
+
+'        // *** First pass to approximate sunrise
+
+        eqtime = calcEquationOfTime(t)
+        SolarDec = calcSunDeclination(t)
+        hourangle = calcHourAngleSunrise(Latitude, SolarDec)
+
+        delta = longitude - radToDeg(hourangle)
+        timeDiff = 4 * delta
+' in minutes of time
+        timeUTC = 720 + timeDiff - eqtime
+' in minutes
+
+' *** Second pass includes fractional jday in gamma calc
+
+        newt = calcTimeJulianCent(calcJDFromJulianCent(t) + timeUTC / 1440#)
+        eqtime = calcEquationOfTime(newt)
+        SolarDec = calcSunDeclination(newt)
+        hourangle = calcHourAngleSunrise(Latitude, SolarDec)
+        delta = longitude - radToDeg(hourangle)
+        timeDiff = 4 * delta
+        timeUTC = 720 + timeDiff - eqtime
+' in minutes
+
+        calcSunriseUTC = timeUTC
+
+End Function
+
+
+Function calcSolNoonUTC(t, longitude)
+
+'***********************************************************************/
+'* Name:    calcSolNoonUTC
+'* Type:    Function
+'* Purpose: calculate the Universal Coordinated Time (UTC) of solar
+'*     noon for the given day at the given location on earth
+'* Arguments:
+'*   t : number of Julian centuries since J2000.0
+'*   longitude : longitude of observer in degrees
+'* Return value:
+'*   time in minutes from zero Z
+'***********************************************************************/
+        
+Dim newt As Double, eqtime As Double, solarNoonDec As Double, solNoonUTC As Double
+        
+        newt = calcTimeJulianCent(calcJDFromJulianCent(t) + 0.5 + longitude / 360#)
+
+        eqtime = calcEquationOfTime(newt)
+        solarNoonDec = calcSunDeclination(newt)
+        solNoonUTC = 720 + (longitude * 4) - eqtime
+        
+        calcSolNoonUTC = solNoonUTC
+
+End Function
+
+
+Function calcSunsetUTC(jd, Latitude, longitude)
+
+'***********************************************************************/
+'* Name:    calcSunsetUTC
+'* Type:    Function
+'* Purpose: calculate the Universal Coordinated Time (UTC) of sunset
+'*         for the given day at the given location on earth
+'* Arguments:
+'*   JD  : julian day
+'*   latitude : latitude of observer in degrees
+'*   longitude : longitude of observer in degrees
+'* Return value:
+'*   time in minutes from zero Z
+'***********************************************************************/
+        
+Dim t As Double, eqtime As Double, SolarDec As Double, hourangle As Double
+Dim delta As Double, timeDiff As Double, timeUTC As Double
+Dim newt As Double
+                
+        t = calcTimeJulianCent(jd)
+
+'        // First calculates sunrise and approx length of day
+
+        eqtime = calcEquationOfTime(t)
+        SolarDec = calcSunDeclination(t)
+        hourangle = calcHourAngleSunset(Latitude, SolarDec)
+
+        delta = longitude - radToDeg(hourangle)
+        timeDiff = 4 * delta
+        timeUTC = 720 + timeDiff - eqtime
+
+'        // first pass used to include fractional day in gamma calc
+
+        newt = calcTimeJulianCent(calcJDFromJulianCent(t) + timeUTC / 1440#)
+        eqtime = calcEquationOfTime(newt)
+        SolarDec = calcSunDeclination(newt)
+        hourangle = calcHourAngleSunset(Latitude, SolarDec)
+
+        delta = longitude - radToDeg(hourangle)
+        timeDiff = 4 * delta
+        timeUTC = 720 + timeDiff - eqtime
+'        // in minutes
+
+        calcSunsetUTC = timeUTC
+
+End Function
+
+
+Function sunrise(lat, lon, year, month, day, timezone, dlstime)
+    
+'***********************************************************************/
+'* Name:    sunrise
+'* Type:    Main Function called by spreadsheet
+'* Purpose: calculate time of sunrise  for the entered date
+'*     and location.
+'* For latitudes greater than 72 degrees N and S, calculations are
+'* accurate to within 10 minutes. For latitudes less than +/- 72°
+'* accuracy is approximately one minute.
+'* Arguments:
+'   latitude = latitude (decimal degrees)
+'   longitude = longitude (decimal degrees)
+'    NOTE: longitude is negative for western hemisphere for input cells
+'          in the spreadsheet for calls to the functions named
+'          sunrise, solarnoon, and sunset. Those functions convert the
+'          longitude to positive for the western hemisphere for calls to
+'          other functions using the original sign convention
+'          from the NOAA javascript code.
+'   year = year
+'   month = month
+'   day = day
+'   timezone = time zone hours relative to GMT/UTC (hours)
+'   dlstime = daylight savings time (0 = no, 1 = yes) (hours)
+'* Return value:
+'*   sunrise time in local time (days)
+'***********************************************************************/
+
+Dim longitude As Double, Latitude As Double, jd As Double
+Dim riseTimeGMT As Double, riseTimeLST As Double
+
+' change sign convention for longitude from negative to positive in western hemisphere
+            longitude = lon * -1
+            Latitude = lat
+            If (Latitude > 89.8) Then Latitude = 89.8
+            If (Latitude < -89.8) Then Latitude = -89.8
+            
+            jd = calcJD(year, month, day)
+
+'            // Calculate sunrise for this date
+            riseTimeGMT = calcSunriseUTC(jd, Latitude, longitude)
+             
+'            //  adjust for time zone and daylight savings time in minutes
+            riseTimeLST = riseTimeGMT + (60 * timezone) + (dlstime * 60)
+
+'            //  convert to days
+            sunrise = riseTimeLST / 1440
+
+End Function
+
+
+Function solarnoon(lat, lon, year, month, day, timezone, dlstime)
+
+'***********************************************************************/
+'* Name:    solarnoon
+'* Type:    Main Function called by spreadsheet
+'* Purpose: calculate the Universal Coordinated Time (UTC) of solar
+'*     noon for the given day at the given location on earth
+'* Arguments:
+'    year
+'    month
+'    day
+'*   longitude : longitude of observer in degrees
+'    NOTE: longitude is negative for western hemisphere for input cells
+'          in the spreadsheet for calls to the functions named
+'          sunrise, solarnoon, and sunset. Those functions convert the
+'          longitude to positive for the western hemisphere for calls to
+'          other functions using the original sign convention
+'          from the NOAA javascript code.
+'* Return value:
+'*   time of solar noon in local time days
+'***********************************************************************/
+        
+Dim longitude As Double, Latitude As Double, jd As Double
+Dim t As Double, newt As Double, eqtime As Double
+Dim solarNoonDec As Double, solNoonUTC As Double
+                
+' change sign convention for longitude from negative to positive in western hemisphere
+        longitude = lon * -1
+        Latitude = lat
+        If (Latitude > 89.8) Then Latitude = 89.8
+        If (Latitude < -89.8) Then Latitude = -89.8
+        
+        jd = calcJD(year, month, day)
+        t = calcTimeJulianCent(jd)
+        
+        newt = calcTimeJulianCent(calcJDFromJulianCent(t) + 0.5 + longitude / 360#)
+
+        eqtime = calcEquationOfTime(newt)
+        solarNoonDec = calcSunDeclination(newt)
+        solNoonUTC = 720 + (longitude * 4) - eqtime
+        
+'            //  adjust for time zone and daylight savings time in minutes
+        solarnoon = solNoonUTC + (60 * timezone) + (dlstime * 60)
+
+'            //  convert to days
+        solarnoon = solarnoon / 1440
+
+End Function
+
+
+Function sunset(lat, lon, year, month, day, timezone, dlstime)
+    
+'***********************************************************************/
+'* Name:    sunset
+'* Type:    Main Function called by spreadsheet
+'* Purpose: calculate time of sunrise and sunset for the entered date
+'*     and location.
+'* For latitudes greater than 72 degrees N and S, calculations are
+'* accurate to within 10 minutes. For latitudes less than +/- 72°
+'* accuracy is approximately one minute.
+'* Arguments:
+'   latitude = latitude (decimal degrees)
+'   longitude = longitude (decimal degrees)
+'    NOTE: longitude is negative for western hemisphere for input cells
+'          in the spreadsheet for calls to the functions named
+'          sunrise, solarnoon, and sunset. Those functions convert the
+'          longitude to positive for the western hemisphere for calls to
+'          other functions using the original sign convention
+'          from the NOAA javascript code.
+'   year = year
+'   month = month
+'   day = day
+'   timezone = time zone hours relative to GMT/UTC (hours)
+'   dlstime = daylight savings time (0 = no, 1 = yes) (hours)
+'* Return value:
+'*   sunset time in local time (days)
+'***********************************************************************/
+            
+Dim longitude As Double, Latitude As Double, jd As Double
+Dim setTimeGMT As Double, setTimeLST As Double
+
+' change sign convention for longitude from negative to positive in western hemisphere
+            longitude = lon * -1
+            Latitude = lat
+            If (Latitude > 89.8) Then Latitude = 89.8
+            If (Latitude < -89.8) Then Latitude = -89.8
+            
+            jd = calcJD(year, month, day)
+
+'           // Calculate sunset for this date
+            setTimeGMT = calcSunsetUTC(jd, Latitude, longitude)
+            
+'            //  adjust for time zone and daylight savings time in minutes
+            setTimeLST = setTimeGMT + (60 * timezone) + (dlstime * 60)
+
+'            //  convert to days
+            sunset = setTimeLST / 1440
+
+End Function
+
+
+Function solarazimuth(lat, lon, year, month, day, _
+                      hours, minutes, seconds, timezone, dlstime)
+
+'***********************************************************************/
+'* Name:    solarazimuth
+'* Type:    Main Function
+'* Purpose: calculate solar azimuth (deg from north) for the entered
+'*          date, time and location. Returns -999999 if darker than twilight
+'*
+'* Arguments:
+'*   latitude, longitude, year, month, day, hour, minute, second,
+'*   timezone, daylightsavingstime
+'* Return value:
+'*   solar azimuth in degrees from north
+'*
+'* Note: solarelevation and solarazimuth functions are identical
+'*       and could be converted to a VBA subroutine that would return
+'*       both values.
+'*
+'***********************************************************************/
+
+Dim longitude As Double, Latitude As Double
+Dim Zone As Double, daySavings As Double
+Dim hh As Double, mm As Double, SS As Double, timenow As Double
+Dim jd As Double, t As Double, R As Double
+Dim alpha As Double, theta As Double, Etime As Double, eqtime As Double
+Dim SolarDec As Double, earthRadVec As Double, solarTimeFix As Double
+Dim trueSolarTime As Double, hourangle As Double, harad As Double
+Dim csz As Double, zenith As Double, azDenom As Double, azRad As Double
+Dim azimuth As Double, exoatmElevation As Double
+Dim step1 As Double, step2 As Double, step3 As Double
+Dim refractionCorrection As Double, Te As Double, solarzen As Double
+
+' change sign convention for longitude from negative to positive in western hemisphere
+            longitude = lon * -1
+            Latitude = lat
+            If (Latitude > 89.8) Then Latitude = 89.8
+            If (Latitude < -89.8) Then Latitude = -89.8
+            
+'change time zone to ppositive hours in western hemisphere
+            Zone = timezone * -1
+            daySavings = dlstime * 60
+            hh = hours - (daySavings / 60)
+            mm = minutes
+            SS = seconds
+
+'//    timenow is GMT time for calculation in hours since 0Z
+            timenow = hh + mm / 60 + SS / 3600 + Zone
+
+            jd = calcJD(year, month, day)
+            t = calcTimeJulianCent(jd + timenow / 24#)
+            R = calcSunRadVector(t)
+            alpha = calcSunRtAscension(t)
+            theta = calcSunDeclination(t)
+            Etime = calcEquationOfTime(t)
+
+            eqtime = Etime
+            SolarDec = theta '//    in degrees
+            earthRadVec = R
+
+            solarTimeFix = eqtime - 4# * longitude + 60# * Zone
+            trueSolarTime = hh * 60# + mm + SS / 60# + solarTimeFix
+            '//    in minutes
+
+            Do While (trueSolarTime > 1440)
+                trueSolarTime = trueSolarTime - 1440
+            Loop
+            
+            hourangle = trueSolarTime / 4# - 180#
+            '//    Thanks to Louis Schwarzmayr for the next line:
+            If (hourangle < -180) Then hourangle = hourangle + 360#
+
+            harad = degToRad(hourangle)
+
+            csz = Sin(degToRad(Latitude)) * _
+                  Sin(degToRad(SolarDec)) + _
+                  Cos(degToRad(Latitude)) * _
+                  Cos(degToRad(SolarDec)) * Cos(harad)
+
+            If (csz > 1#) Then
+                csz = 1#
+            ElseIf (csz < -1#) Then
+                csz = -1#
+            End If
+            
+            zenith = radToDeg(Application.WorksheetFunction.Acos(csz))
+
+            azDenom = (Cos(degToRad(Latitude)) * Sin(degToRad(zenith)))
+            
+            If (Abs(azDenom) > 0.001) Then
+                azRad = ((Sin(degToRad(Latitude)) * _
+                    Cos(degToRad(zenith))) - _
+                    Sin(degToRad(SolarDec))) / azDenom
+                If (Abs(azRad) > 1#) Then
+                    If (azRad < 0) Then
+                        azRad = -1#
+                    Else
+                        azRad = 1#
+                    End If
+                End If
+
+                azimuth = 180# - radToDeg(Application.WorksheetFunction.Acos(azRad))
+
+                If (hourangle > 0#) Then
+                    azimuth = -azimuth
+                End If
+            Else
+                If (Latitude > 0#) Then
+                    azimuth = 180#
+                Else
+                    azimuth = 0#
+                End If
+            End If
+            If (azimuth < 0#) Then
+                azimuth = azimuth + 360#
+            End If
+                        
+            exoatmElevation = 90# - zenith
+
+'beginning of complex expression commented out
+'            If (exoatmElevation > 85#) Then
+'                refractionCorrection = 0#
+'            Else
+'                te = Tan(degToRad(exoatmElevation))
+'                If (exoatmElevation > 5#) Then
+'                    refractionCorrection = 58.1 / te - 0.07 / (te * te * te) + _
+'                        0.000086 / (te * te * te * te * te)
+'                ElseIf (exoatmElevation > -0.575) Then
+'                    refractionCorrection = 1735# + exoatmElevation * _
+'                        (-518.2 + exoatmElevation * (103.4 + _
+'                        exoatmElevation * (-12.79 + _
+'                        exoatmElevation * 0.711)))
+'                Else
+'                    refractionCorrection = -20.774 / te
+'                End If
+'                refractionCorrection = refractionCorrection / 3600#
+'            End If
+'end of complex expression
+
+'beginning of simplified expression
+            If (exoatmElevation > 85#) Then
+                refractionCorrection = 0#
+            Else
+                Te = Tan(degToRad(exoatmElevation))
+                If (exoatmElevation > 5#) Then
+                    refractionCorrection = 58.1 / Te - 0.07 / (Te * Te * Te) + _
+                        0.000086 / (Te * Te * Te * Te * Te)
+                ElseIf (exoatmElevation > -0.575) Then
+                    step1 = (-12.79 + exoatmElevation * 0.711)
+                    step2 = (103.4 + exoatmElevation * (step1))
+                    step3 = (-518.2 + exoatmElevation * (step2))
+                    refractionCorrection = 1735# + exoatmElevation * (step3)
+                Else
+                    refractionCorrection = -20.774 / Te
+                End If
+                refractionCorrection = refractionCorrection / 3600#
+            End If
+'end of simplified expression
+            
+            solarzen = zenith - refractionCorrection
+                     
+'            If (solarZen < 108#) Then
+              solarazimuth = azimuth
+'              solarelevation = 90# - solarZen
+'              If (solarZen < 90#) Then
+'                coszen = Cos(degToRad(solarZen))
+'              Else
+'                coszen = 0#
+'              End If
+'            Else    '// do not report az & el after astro twilight
+'              solarazimuth = -999999
+'              solarelevation = -999999
+'              coszen = -999999
+'            End If
+
+End Function
+
+
+Function solarelevation(lat, lon, year, month, day, _
+                      hours, minutes, seconds, timezone, dlstime)
+
+'***********************************************************************/
+'* Name:    solarazimuth
+'* Type:    Main Function
+'* Purpose: calculate solar azimuth (deg from north) for the entered
+'*          date, time and location. Returns -999999 if darker than twilight
+'*
+'* Arguments:
+'*   latitude, longitude, year, month, day, hour, minute, second,
+'*   timezone, daylightsavingstime
+'* Return value:
+'*   solar azimuth in degrees from north
+'*
+'* Note: solarelevation and solarazimuth functions are identical
+'*       and could converted to a VBA subroutine that would return
+'*       both values.
+'*
+'***********************************************************************/
+
+Dim longitude As Double, Latitude As Double
+Dim Zone As Double, daySavings As Double
+Dim hh As Double, mm As Double, SS As Double, timenow As Double
+Dim jd As Double, t As Double, R As Double
+Dim alpha As Double, theta As Double, Etime As Double, eqtime As Double
+Dim SolarDec As Double, earthRadVec As Double, solarTimeFix As Double
+Dim trueSolarTime As Double, hourangle As Double, harad As Double
+Dim csz As Double, zenith As Double, azDenom As Double, azRad As Double
+Dim azimuth As Double, exoatmElevation As Double
+Dim step1 As Double, step2 As Double, step3 As Double
+Dim refractionCorrection As Double, Te As Double, solarzen As Double
+
+' change sign convention for longitude from negative to positive in western hemisphere
+            longitude = lon * -1
+            Latitude = lat
+            If (Latitude > 89.8) Then Latitude = 89.8
+            If (Latitude < -89.8) Then Latitude = -89.8
+            
+'change time zone to ppositive hours in western hemisphere
+            Zone = timezone * -1
+            daySavings = dlstime * 60
+            hh = hours - (daySavings / 60)
+            mm = minutes
+            SS = seconds
+
+'//    timenow is GMT time for calculation in hours since 0Z
+            timenow = hh + mm / 60 + SS / 3600 + Zone
+
+            jd = calcJD(year, month, day)
+            t = calcTimeJulianCent(jd + timenow / 24#)
+            R = calcSunRadVector(t)
+            alpha = calcSunRtAscension(t)
+            theta = calcSunDeclination(t)
+            Etime = calcEquationOfTime(t)
+
+            eqtime = Etime
+            SolarDec = theta '//    in degrees
+            earthRadVec = R
+
+            solarTimeFix = eqtime - 4# * longitude + 60# * Zone
+            trueSolarTime = hh * 60# + mm + SS / 60# + solarTimeFix
+            '//    in minutes
+
+            Do While (trueSolarTime > 1440)
+                trueSolarTime = trueSolarTime - 1440
+            Loop
+            
+            hourangle = trueSolarTime / 4# - 180#
+            '//    Thanks to Louis Schwarzmayr for the next line:
+            If (hourangle < -180) Then hourangle = hourangle + 360#
+
+            harad = degToRad(hourangle)
+
+            csz = Sin(degToRad(Latitude)) * _
+                  Sin(degToRad(SolarDec)) + _
+                  Cos(degToRad(Latitude)) * _
+                  Cos(degToRad(SolarDec)) * Cos(harad)
+
+            If (csz > 1#) Then
+                csz = 1#
+            ElseIf (csz < -1#) Then
+                csz = -1#
+            End If
+            
+            zenith = radToDeg(Application.WorksheetFunction.Acos(csz))
+
+            azDenom = (Cos(degToRad(Latitude)) * Sin(degToRad(zenith)))
+            
+            If (Abs(azDenom) > 0.001) Then
+                azRad = ((Sin(degToRad(Latitude)) * _
+                    Cos(degToRad(zenith))) - _
+                    Sin(degToRad(SolarDec))) / azDenom
+                If (Abs(azRad) > 1#) Then
+                    If (azRad < 0) Then
+                        azRad = -1#
+                    Else
+                        azRad = 1#
+                    End If
+                End If
+
+                azimuth = 180# - radToDeg(Application.WorksheetFunction.Acos(azRad))
+
+                If (hourangle > 0#) Then
+                    azimuth = -azimuth
+                End If
+            Else
+                If (Latitude > 0#) Then
+                    azimuth = 180#
+                Else
+                    azimuth = 0#
+                End If
+            End If
+            If (azimuth < 0#) Then
+                azimuth = azimuth + 360#
+            End If
+                        
+            exoatmElevation = 90# - zenith
+
+'beginning of complex expression commented out
+'            If (exoatmElevation > 85#) Then
+'                refractionCorrection = 0#
+'            Else
+'                te = Tan(degToRad(exoatmElevation))
+'                If (exoatmElevation > 5#) Then
+'                    refractionCorrection = 58.1 / te - 0.07 / (te * te * te) + _
+'                        0.000086 / (te * te * te * te * te)
+'                ElseIf (exoatmElevation > -0.575) Then
+'                    refractionCorrection = 1735# + exoatmElevation * _
+'                        (-518.2 + exoatmElevation * (103.4 + _
+'                        exoatmElevation * (-12.79 + _
+'                        exoatmElevation * 0.711)))
+'                Else
+'                    refractionCorrection = -20.774 / te
+'                End If
+'                refractionCorrection = refractionCorrection / 3600#
+'            End If
+'end of complex expression
+
+'beginning of simplified expression
+            If (exoatmElevation > 85#) Then
+                refractionCorrection = 0#
+            Else
+                Te = Tan(degToRad(exoatmElevation))
+                If (exoatmElevation > 5#) Then
+                    refractionCorrection = 58.1 / Te - 0.07 / (Te * Te * Te) + _
+                        0.000086 / (Te * Te * Te * Te * Te)
+                ElseIf (exoatmElevation > -0.575) Then
+                    step1 = (-12.79 + exoatmElevation * 0.711)
+                    step2 = (103.4 + exoatmElevation * (step1))
+                    step3 = (-518.2 + exoatmElevation * (step2))
+                    refractionCorrection = 1735# + exoatmElevation * (step3)
+                Else
+                    refractionCorrection = -20.774 / Te
+                End If
+                refractionCorrection = refractionCorrection / 3600#
+            End If
+'end of simplified expression
+            
+            solarzen = zenith - refractionCorrection
+                     
+'            If (solarZen < 108#) Then
+'              solarazimuth = azimuth
+              solarelevation = 90# - solarzen
+'              If (solarZen < 90#) Then
+'                coszen = Cos(degToRad(solarZen))
+'              Else
+'                coszen = 0#
+'              End If
+'            Else    '// do not report az & el after astro twilight
+'              solarazimuth = -999999
+'              solarelevation = -999999
+'              coszen = -999999
+'            End If
+
+End Function
+
+
+Sub solarposition(lat, lon, year, month, day, _
+        hours, minutes, seconds, timezone, dlstime, _
+        solarazimuth, solarelevation, earthRadVec)
+
+'***********************************************************************/
+'* Name:    solarazimuth
+'* Type:    Main Function
+'* Purpose: calculate solar azimuth (deg from north) for the entered
+'*          date, time and location. Returns -999999 if darker than twilight
+'*
+'* Arguments:
+'*   latitude, longitude, year, month, day, hour, minute, second,
+'*   timezone, daylightsavingstime
+'* Return value:
+'*   solar azimuth in degrees from north
+'*
+'* Note: solarelevation and solarazimuth functions are identical
+'*       and could converted to a VBA subroutine that would return
+'*       both values.
+'*
+'***********************************************************************/
+
+Dim longitude As Double, Latitude As Double
+Dim Zone As Double, daySavings As Double
+Dim hh As Double, mm As Double, SS As Double, timenow As Double
+Dim jd As Double, t As Double, R As Double
+Dim alpha As Double, theta As Double, Etime As Double, eqtime As Double
+'Dim SolarDec As Double, earthRadVec As Double, solarTimeFix As Double
+Dim SolarDec As Double, solarTimeFix As Double
+Dim trueSolarTime As Double, hourangle As Double, harad As Double
+Dim csz As Double, zenith As Double, azDenom As Double, azRad As Double
+Dim azimuth As Double, exoatmElevation As Double
+Dim step1 As Double, step2 As Double, step3 As Double
+Dim refractionCorrection As Double, Te As Double, solarzen As Double
+
+' change sign convention for longitude from negative to positive in western hemisphere
+            longitude = lon * -1
+            Latitude = lat
+            If (Latitude > 89.8) Then Latitude = 89.8
+            If (Latitude < -89.8) Then Latitude = -89.8
+            
+'change time zone to ppositive hours in western hemisphere
+            Zone = timezone * -1
+            daySavings = dlstime * 60
+            hh = hours - (daySavings / 60)
+            mm = minutes
+            SS = seconds
+
+'//    timenow is GMT time for calculation in hours since 0Z
+            timenow = hh + mm / 60 + SS / 3600 + Zone
+
+            jd = calcJD(year, month, day)
+            t = calcTimeJulianCent(jd + timenow / 24#)
+            R = calcSunRadVector(t)
+            alpha = calcSunRtAscension(t)
+            theta = calcSunDeclination(t)
+            Etime = calcEquationOfTime(t)
+
+            eqtime = Etime
+            SolarDec = theta '//    in degrees
+            earthRadVec = R
+
+            solarTimeFix = eqtime - 4# * longitude + 60# * Zone
+            trueSolarTime = hh * 60# + mm + SS / 60# + solarTimeFix
+            '//    in minutes
+
+            Do While (trueSolarTime > 1440)
+                trueSolarTime = trueSolarTime - 1440
+            Loop
+            
+            hourangle = trueSolarTime / 4# - 180#
+            '//    Thanks to Louis Schwarzmayr for the next line:
+            If (hourangle < -180) Then hourangle = hourangle + 360#
+
+            harad = degToRad(hourangle)
+
+            csz = Sin(degToRad(Latitude)) * _
+                  Sin(degToRad(SolarDec)) + _
+                  Cos(degToRad(Latitude)) * _
+                  Cos(degToRad(SolarDec)) * Cos(harad)
+
+            If (csz > 1#) Then
+                csz = 1#
+            ElseIf (csz < -1#) Then
+                csz = -1#
+            End If
+            
+            zenith = radToDeg(Application.WorksheetFunction.Acos(csz))
+
+            azDenom = (Cos(degToRad(Latitude)) * Sin(degToRad(zenith)))
+            
+            If (Abs(azDenom) > 0.001) Then
+                azRad = ((Sin(degToRad(Latitude)) * _
+                    Cos(degToRad(zenith))) - _
+                    Sin(degToRad(SolarDec))) / azDenom
+                If (Abs(azRad) > 1#) Then
+                    If (azRad < 0) Then
+                        azRad = -1#
+                    Else
+                        azRad = 1#
+                    End If
+                End If
+
+                azimuth = 180# - radToDeg(Application.WorksheetFunction.Acos(azRad))
+
+                If (hourangle > 0#) Then
+                    azimuth = -azimuth
+                End If
+            Else
+                If (Latitude > 0#) Then
+                    azimuth = 180#
+                Else
+                    azimuth = 0#
+                End If
+            End If
+            If (azimuth < 0#) Then
+                azimuth = azimuth + 360#
+            End If
+                        
+            exoatmElevation = 90# - zenith
+
+'beginning of complex expression commented out
+'            If (exoatmElevation > 85#) Then
+'                refractionCorrection = 0#
+'            Else
+'                te = Tan(degToRad(exoatmElevation))
+'                If (exoatmElevation > 5#) Then
+'                    refractionCorrection = 58.1 / te - 0.07 / (te * te * te) + _
+'                        0.000086 / (te * te * te * te * te)
+'                ElseIf (exoatmElevation > -0.575) Then
+'                    refractionCorrection = 1735# + exoatmElevation * _
+'                        (-518.2 + exoatmElevation * (103.4 + _
+'                        exoatmElevation * (-12.79 + _
+'                        exoatmElevation * 0.711)))
+'                Else
+'                    refractionCorrection = -20.774 / te
+'                End If
+'                refractionCorrection = refractionCorrection / 3600#
+'            End If
+'end of complex expression
+
+
+'beginning of simplified expression
+            If (exoatmElevation > 85#) Then
+                refractionCorrection = 0#
+            Else
+                Te = Tan(degToRad(exoatmElevation))
+                If (exoatmElevation > 5#) Then
+                    refractionCorrection = 58.1 / Te - 0.07 / (Te * Te * Te) + _
+                        0.000086 / (Te * Te * Te * Te * Te)
+                ElseIf (exoatmElevation > -0.575) Then
+                    step1 = (-12.79 + exoatmElevation * 0.711)
+                    step2 = (103.4 + exoatmElevation * (step1))
+                    step3 = (-518.2 + exoatmElevation * (step2))
+                    refractionCorrection = 1735# + exoatmElevation * (step3)
+                Else
+                    refractionCorrection = -20.774 / Te
+                End If
+                refractionCorrection = refractionCorrection / 3600#
+            End If
+'end of simplified expression
+            
+            
+            solarzen = zenith - refractionCorrection
+                     
+'            If (solarZen < 108#) Then
+              solarazimuth = azimuth
+              solarelevation = 90# - solarzen
+'              If (solarZen < 90#) Then
+'                coszen = Cos(degToRad(solarZen))
+'              Else
+'                coszen = 0#
+'              End If
+'            Else    '// do not report az & el after astro twilight
+'              solarazimuth = -999999
+'              solarelevation = -999999
+'              coszen = -999999
+'            End If
+
+End Sub
+
+
+Option Explicit
+
+
+Sub BirdAndHulstrom(year, jd, ZEN, R, birdETR, pressureMb, ozoneCm, waterCm, AOD500nm, AOD380nm, Ba, albedo, _
+                     directBeam, directHz, globalHz, diffuseHz)
+'Bird and Hulstrom's solar radiation model
+'From the publication "A Simplified Clear Sky model
+'for Direct and Diffuse Insolation on Horizontal Surfaces"
+'by R.E. Bird and R.L Hulstrom, SERI Technical Report
+'SERI/TR-642-761, Feb 1991.
+'Solar Energy Research Institute, Golden, CO.
+'ZEN = solar zenith angle radians
+'R = distance from earth to sun in AU e.g from NOAA/Meeus algorithms
+
+Dim solConNREL As Double, RavBeta As Double, Rav2Rsq As Double
+'Dim pressureMb As Double, ozoneCm As Double, waterCm As Double
+'Dim AOD500nm As Double, AOD380nm As Double, Ba As Double, albedo As Double
+Dim airMass As Double, tauA As Double
+Dim tRayliegh As Double, tOzone As Double, tGases As Double, tWater As Double, tAerosol As Double
+Dim TAA As Double, rs As Double, Id As Double, IdnH As Double, Ias As Double, GH As Double
+
+'gp the following calculation of RavBeta and Rav2Rsq is for comparison with NOAA/Meeus R - it is not used for for solar rad
+'First, calculate extraterrestrial radiation (birdETR) corrected for earth radius vector
+'based on Partridge, G. W. and Platt, C. M. R. 1976.
+'Radiative Processes in Meteorology and Climatology.
+'as described by
+'http://solardat.uoregon.edu/SolarRadiationBasics.html
+'If year / 4 - Int(year / 4) = 0 Then
+' RavBeta = 2 * Application.WorksheetFunction.Pi() * jd / 366     'leap year
+'Else
+' RavBeta = 2 * Application.WorksheetFunction.Pi() * jd / 365     'not leap year
+'End If
+'Rav2Rsq = 1.00011 _
+'          + 0.034221 * Cos(RavBeta) _
+'          + 0.00128 * Sin(RavBeta) _
+'          + 0.000719 * Cos(2 * RavBeta) _
+'          + 0.000077 * Sin(2 * RavBeta)
+
+'NREL solar constant of 1367 W/m^2
+solConNREL = 1367
+
+'un-comment next line to use Partridge and Platt estimate of corrected ETR
+'birdETR = solConNREL * Rav2Rsq
+
+'un-comment next line to use Bird and Hulstrom values of daily ETR
+'birdETR = dailyETR(JD)   'hardwire Bird and Hulstrom's values for daily ETR
+
+'un-comment next line to use Bras/TVA adjustment of ETR normal to beam for earth sun distance
+birdETR = solConNREL / R ^ 2
+
+'Next, calculate insolation using Bird and Hulstrom model
+tauA = 0.2758 * AOD380nm + 0.35 * AOD500nm  'broadband aerosol optical depth -
+                                            'typical values range from 0.02 to 0.5
+If radToDeg(ZEN) < 89 Then
+ airMass = 1 / (Cos(ZEN) + 0.15 / (93.885 - radToDeg(ZEN)) ^ 1.253)    'gp Rob Annear's review of literature changes 1.25 to 1.253
+ tRayliegh = Exp(-0.0903 * (pressureMb / 1013) ^ 0.84 _
+                     * (1 + pressureMb / 1013 - _
+                           (pressureMb / 1013) ^ 1.01))
+ tOzone = 1 - 0.1611 * (ozoneCm * airMass) * _
+         (1 + 139.48 * (ozoneCm * airMass)) ^ -0.3035 _
+          - 0.002715 * (ozoneCm * airMass) / _
+          (1 + 0.044 * (ozoneCm * airMass) + _
+              0.0003 * (ozoneCm * airMass) ^ 2)                       'gp Rob changed -0.3034 to -0.3035
+ tGases = Exp(-0.0127 * airMass * pressureMb / 1013)
+ tWater = 1 - 2.4959 * airMass * waterCm / _
+                  ((1 + 79.034 * waterCm * airMass) ^ 0.6828 _
+                       + 6.385 * waterCm * airMass)
+ tAerosol = Exp(-(tauA ^ 0.873) * (1 + tauA - tauA ^ 0.7088) * airMass ^ 0.918)
+ TAA = 1 - 0.1 * (1 - airMass + airMass ^ 1.06) * (1 - tAerosol)
+ rs = 0.0685 + (1 - Ba) * (1 - tAerosol / TAA)
+ Id = 0.9662 * birdETR * tAerosol * tWater * tGases * tOzone * tRayliegh
+ Ias = birdETR * Cos(ZEN) * 0.79 * tOzone * tGases * tWater * TAA * _
+      ((0.5 * (1 - tRayliegh) + Ba * (1 - (tAerosol / TAA))) / _
+      (1 - airMass + (airMass) ^ 1.02))                               'gp Rob changed (0.5 to ((0.5 and TAA)) to TAA)))
+Else
+ airMass = 0
+ tRayliegh = 0
+ tOzone = 0
+ tGases = 0
+ tWater = 0
+ tAerosol = 0
+ TAA = 0
+ rs = 0
+ Id = 0
+ Ias = 0
+End If
+If radToDeg(ZEN) < 90 Then
+ IdnH = Id * Cos(ZEN)
+Else
+ IdnH = 0
+End If
+If airMass > 0 Then
+ GH = (IdnH + Ias) / (1 - albedo * rs)
+Else
+ GH = 0
+End If
+directBeam = Id
+directHz = IdnH
+globalHz = GH
+diffuseHz = GH - IdnH
+
+'diagnostic output
+' Sheets("debug").Select
+'  ActiveCell.Formula = jd
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = el
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = R
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = (1 / Rav2Rsq) ^ 0.5
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = globalHz
+'  ActiveCell.Offset(1, -4).Select
+
+
+End Sub
+
+Function dailyETR(jd)
+
+Dim birdETR(366)
+
+birdETR(1) = 1423.8
+birdETR(2) = 1423.8
+birdETR(3) = 1423.8
+birdETR(4) = 1423.7
+birdETR(5) = 1423.7
+birdETR(6) = 1423.6
+birdETR(7) = 1423.5
+birdETR(8) = 1423.4
+birdETR(9) = 1423.2
+birdETR(10) = 1423#
+birdETR(11) = 1422.8
+birdETR(12) = 1422.6
+birdETR(13) = 1422.3
+birdETR(14) = 1422.1
+birdETR(15) = 1421.8
+birdETR(16) = 1421.4
+birdETR(17) = 1421.1
+birdETR(18) = 1420.7
+birdETR(19) = 1420.3
+birdETR(20) = 1419.9
+birdETR(21) = 1419.4
+birdETR(22) = 1419#
+birdETR(23) = 1418.5
+birdETR(24) = 1418#
+birdETR(25) = 1417.4
+birdETR(26) = 1416.9
+birdETR(27) = 1416.3
+birdETR(28) = 1415.7
+birdETR(29) = 1415.1
+birdETR(30) = 1414.5
+birdETR(31) = 1413.8
+birdETR(32) = 1413.2
+birdETR(33) = 1412.5
+birdETR(34) = 1411.8
+birdETR(35) = 1411#
+birdETR(36) = 1410.3
+birdETR(37) = 1409.5
+birdETR(38) = 1408.8
+birdETR(39) = 1408#
+birdETR(40) = 1407.2
+birdETR(41) = 1406.4
+birdETR(42) = 1405.6
+birdETR(43) = 1404.7
+birdETR(44) = 1403.9
+birdETR(45) = 1403#
+birdETR(46) = 1402.1
+birdETR(47) = 1401.2
+birdETR(48) = 1400.3
+birdETR(49) = 1399.4
+birdETR(50) = 1398.5
+birdETR(51) = 1397.6
+birdETR(52) = 1396.7
+birdETR(53) = 1395.7
+birdETR(54) = 1394.8
+birdETR(55) = 1393.8
+birdETR(56) = 1392.9
+birdETR(57) = 1391.9
+birdETR(58) = 1391#
+birdETR(59) = 1390#
+birdETR(60) = 1389#
+birdETR(61) = 1388#
+birdETR(62) = 1387.1
+birdETR(63) = 1386.1
+birdETR(64) = 1385.1
+birdETR(65) = 1384.1
+birdETR(66) = 1383.2
+birdETR(67) = 1382.2
+birdETR(68) = 1381.2
+birdETR(69) = 1380.2
+birdETR(70) = 1379.2
+birdETR(71) = 1378.3
+birdETR(72) = 1377.3
+birdETR(73) = 1376.3
+birdETR(74) = 1375.4
+birdETR(75) = 1374.4
+birdETR(76) = 1373.5
+birdETR(77) = 1372.5
+birdETR(78) = 1371.6
+birdETR(79) = 1370.7
+birdETR(80) = 1369.7
+birdETR(81) = 1368.8
+birdETR(82) = 1367.9
+birdETR(83) = 1367#
+birdETR(84) = 1366.1
+birdETR(85) = 1365.2
+birdETR(86) = 1364.3
+birdETR(87) = 1363.5
+birdETR(88) = 1362.6
+birdETR(89) = 1361.8
+birdETR(90) = 1360.9
+birdETR(91) = 1360.1
+birdETR(92) = 1359.3
+birdETR(93) = 1358.5
+birdETR(94) = 1357.7
+birdETR(95) = 1356.9
+birdETR(96) = 1356.1
+birdETR(97) = 1355.4
+birdETR(98) = 1354.6
+birdETR(99) = 1353.9
+birdETR(100) = 1353.2
+birdETR(101) = 1352.4
+birdETR(102) = 1351.7
+birdETR(103) = 1351.1
+birdETR(104) = 1350.4
+birdETR(105) = 1349.7
+birdETR(106) = 1349.1
+birdETR(107) = 1348.5
+birdETR(108) = 1347.8
+birdETR(109) = 1347.2
+birdETR(110) = 1346.6
+birdETR(111) = 1346.1
+birdETR(112) = 1345.5
+birdETR(113) = 1344.9
+birdETR(114) = 1344.4
+birdETR(115) = 1343.9
+birdETR(116) = 1343.4
+birdETR(117) = 1342.9
+birdETR(118) = 1342.4
+birdETR(119) = 1341.9
+birdETR(120) = 1341.4
+birdETR(121) = 1341#
+birdETR(122) = 1340.6
+birdETR(123) = 1340.1
+birdETR(124) = 1339.7
+birdETR(125) = 1339.3
+birdETR(126) = 1338.9
+birdETR(127) = 1338.6
+birdETR(128) = 1338.2
+birdETR(129) = 1337.8
+birdETR(130) = 1337.5
+birdETR(131) = 1337.2
+birdETR(132) = 1336.9
+birdETR(133) = 1336.6
+birdETR(134) = 1336.3
+birdETR(135) = 1336#
+birdETR(136) = 1335.7
+birdETR(137) = 1335.4
+birdETR(138) = 1335.2
+birdETR(139) = 1334.9
+birdETR(140) = 1334.7
+birdETR(141) = 1334.5
+birdETR(142) = 1334.2
+birdETR(143) = 1334#
+birdETR(144) = 1333.8
+birdETR(145) = 1333.6
+birdETR(146) = 1333.4
+birdETR(147) = 1333.3
+birdETR(148) = 1333.1
+birdETR(149) = 1332.9
+birdETR(150) = 1332.8
+birdETR(151) = 1332.6
+birdETR(152) = 1332.5
+birdETR(153) = 1332.3
+birdETR(154) = 1332.2
+birdETR(155) = 1332.1
+birdETR(156) = 1332#
+birdETR(157) = 1331.9
+birdETR(158) = 1331.7
+birdETR(159) = 1331.6
+birdETR(160) = 1331.5
+birdETR(161) = 1331.4
+birdETR(162) = 1331.4
+birdETR(163) = 1331.3
+birdETR(164) = 1331.2
+birdETR(165) = 1331.1
+birdETR(166) = 1331#
+birdETR(167) = 1331#
+birdETR(168) = 1330.9
+birdETR(169) = 1330.8
+birdETR(170) = 1330.8
+birdETR(171) = 1330.7
+birdETR(172) = 1330.7
+birdETR(173) = 1330.6
+birdETR(174) = 1330.6
+birdETR(175) = 1330.5
+birdETR(176) = 1330.5
+birdETR(177) = 1330.4
+birdETR(178) = 1330.4
+birdETR(179) = 1330.3
+birdETR(180) = 1330.3
+birdETR(181) = 1330.3
+birdETR(182) = 1330.2
+birdETR(183) = 1330.2
+birdETR(184) = 1330.2
+birdETR(185) = 1330.2
+birdETR(186) = 1330.1
+birdETR(187) = 1330.1
+birdETR(188) = 1330.1
+birdETR(189) = 1330.1
+birdETR(190) = 1330.1
+birdETR(191) = 1330.1
+birdETR(192) = 1330.1
+birdETR(193) = 1330.1
+birdETR(194) = 1330#
+birdETR(195) = 1330#
+birdETR(196) = 1330.1
+birdETR(197) = 1330.1
+birdETR(198) = 1330.1
+birdETR(199) = 1330.1
+birdETR(200) = 1330.1
+birdETR(201) = 1330.1
+birdETR(202) = 1330.1
+birdETR(203) = 1330.2
+birdETR(204) = 1330.2
+birdETR(205) = 1330.2
+birdETR(206) = 1330.3
+birdETR(207) = 1330.3
+birdETR(208) = 1330.4
+birdETR(209) = 1330.4
+birdETR(210) = 1330.5
+birdETR(211) = 1330.5
+birdETR(212) = 1330.6
+birdETR(213) = 1330.7
+birdETR(214) = 1330.8
+birdETR(215) = 1330.9
+birdETR(216) = 1331#
+birdETR(217) = 1331.1
+birdETR(218) = 1331.2
+birdETR(219) = 1331.3
+birdETR(220) = 1331.4
+birdETR(221) = 1331.5
+birdETR(222) = 1331.7
+birdETR(223) = 1331.8
+birdETR(224) = 1332#
+birdETR(225) = 1332.2
+birdETR(226) = 1332.3
+birdETR(227) = 1332.5
+birdETR(228) = 1332.7
+birdETR(229) = 1332.9
+birdETR(230) = 1333.1
+birdETR(231) = 1333.4
+birdETR(232) = 1333.6
+birdETR(233) = 1333.8
+birdETR(234) = 1334.1
+birdETR(235) = 1334.4
+birdETR(236) = 1334.6
+birdETR(237) = 1334.9
+birdETR(238) = 1335.2
+birdETR(239) = 1335.5
+birdETR(240) = 1335.9
+birdETR(241) = 1336.2
+birdETR(242) = 1336.6
+birdETR(243) = 1336.9
+birdETR(244) = 1337.3
+birdETR(245) = 1337.7
+birdETR(246) = 1338.1
+birdETR(247) = 1338.5
+birdETR(248) = 1338.9
+birdETR(249) = 1339.4
+birdETR(250) = 1339.8
+birdETR(251) = 1340.3
+birdETR(252) = 1340.8
+birdETR(253) = 1341.3
+birdETR(254) = 1341.8
+birdETR(255) = 1342.3
+birdETR(256) = 1342.9
+birdETR(257) = 1343.4
+birdETR(258) = 1344#
+birdETR(259) = 1344.6
+birdETR(260) = 1345.2
+birdETR(261) = 1345.8
+birdETR(262) = 1346.4
+birdETR(263) = 1347#
+birdETR(264) = 1347.7
+birdETR(265) = 1348.4
+birdETR(266) = 1349#
+birdETR(267) = 1349.7
+birdETR(268) = 1350.4
+birdETR(269) = 1351.2
+birdETR(270) = 1351.9
+birdETR(271) = 1352.7
+birdETR(272) = 1353.4
+birdETR(273) = 1354.2
+birdETR(274) = 1355#
+birdETR(275) = 1355.8
+birdETR(276) = 1356.6
+birdETR(277) = 1357.4
+birdETR(278) = 1358.2
+birdETR(279) = 1359.1
+birdETR(280) = 1359.9
+birdETR(281) = 1360.8
+birdETR(282) = 1361.7
+birdETR(283) = 1362.6
+birdETR(284) = 1363.5
+birdETR(285) = 1364.4
+birdETR(286) = 1365.3
+birdETR(287) = 1366.2
+birdETR(288) = 1367.2
+birdETR(289) = 1368.1
+birdETR(290) = 1369#
+birdETR(291) = 1370#
+birdETR(292) = 1371#
+birdETR(293) = 1371.9
+birdETR(294) = 1372.9
+birdETR(295) = 1373.9
+birdETR(296) = 1374.9
+birdETR(297) = 1375.9
+birdETR(298) = 1376.8
+birdETR(299) = 1377.8
+birdETR(300) = 1378.8
+birdETR(301) = 1379.8
+birdETR(302) = 1380.8
+birdETR(303) = 1381.8
+birdETR(304) = 1382.8
+birdETR(305) = 1383.9
+birdETR(306) = 1384.9
+birdETR(307) = 1385.9
+birdETR(308) = 1386.9
+birdETR(309) = 1387.9
+birdETR(310) = 1388.9
+birdETR(311) = 1389.8
+birdETR(312) = 1390.8
+birdETR(313) = 1391.8
+birdETR(314) = 1392.8
+birdETR(315) = 1393.8
+birdETR(316) = 1394.7
+birdETR(317) = 1395.7
+birdETR(318) = 1396.7
+birdETR(319) = 1397.6
+birdETR(320) = 1398.5
+birdETR(321) = 1399.5
+birdETR(322) = 1400.4
+birdETR(323) = 1401.3
+birdETR(324) = 1402.2
+birdETR(325) = 1403.1
+birdETR(326) = 1403.9
+birdETR(327) = 1404.8
+birdETR(328) = 1405.7
+birdETR(329) = 1406.5
+birdETR(330) = 1407.3
+birdETR(331) = 1408.1
+birdETR(332) = 1408.9
+birdETR(333) = 1409.7
+birdETR(334) = 1410.4
+birdETR(335) = 1411.2
+birdETR(336) = 1411.9
+birdETR(337) = 1412.6
+birdETR(338) = 1413.3
+birdETR(339) = 1414#
+birdETR(340) = 1414.6
+birdETR(341) = 1415.3
+birdETR(342) = 1415.9
+birdETR(343) = 1416.5
+birdETR(344) = 1417#
+birdETR(345) = 1417.6
+birdETR(346) = 1418.1
+birdETR(347) = 1418.6
+birdETR(348) = 1419.1
+birdETR(349) = 1419.6
+birdETR(350) = 1420#
+birdETR(351) = 1420.4
+birdETR(352) = 1420.8
+birdETR(353) = 1421.2
+birdETR(354) = 1421.5
+birdETR(355) = 1421.9
+birdETR(356) = 1422.2
+birdETR(357) = 1422.4
+birdETR(358) = 1422.7
+birdETR(359) = 1422.9
+birdETR(360) = 1423.1
+birdETR(361) = 1423.3
+birdETR(362) = 1423.4
+birdETR(363) = 1423.5
+birdETR(364) = 1423.6
+birdETR(365) = 1423.7
+birdETR(366) = 1423.7
+
+dailyETR = birdETR(jd)
+
+End Function
+
+
+Option Explicit
+
+
+Sub BrasSolar(el, R, nfac, Iclear)
+'Bras method for atmpospheric attenuation of solar radiation from a clear sky
+
+'inputs:
+'jd = julian day (Jan 1=1, etc.)
+'year = current year
+'dayfrac = current time of day as a fraction of the day (0-1)
+'el = solar elevation (deg from horizon)
+'R = distance from earth to sun in AU
+'nfac = atmospheric turbidity paramter (2=clear, 4-5=smoggy")
+
+'output:
+'Iclear = clear-sky solar radiation at input solar elevation (W/m^2)
+
+Dim Rtest As Double
+Dim I0 As Double, m As Double, a1 As Double, W0 As Double
+
+'NREL solar constant (W/m^2)
+W0 = 1367
+
+'ratio of actual earth-sun distance to mean earth-sun distance (Bras eqn 2.10) for comparison with NOAA/Meeus estimate
+'If year / 4 - Int(year / 4) = 0 Then
+' Rtest = 1 + 0.017 * Cos((2 * pii / 366) * (186 - jd - 1 + dayfrac))
+'Else
+' Rtest = 1 + 0.017 * Cos((2 * pii / 365) * (186 - jd - 1 + dayfrac))
+'End If
+
+'solar radiation on horizontal surface at top of atmosphere (Bras eqn 2.9)
+I0 = (W0 / R ^ 2) * Sin(degToRad(el))
+
+'optical air mass (Bras eqn 2.22)
+m = (Sin(degToRad(el)) + 0.15 * (el + 3.885) ^ -1.253) ^ -1                 'Bras eqn 2.22
+
+'molecular scattering coeff (Bras eqn 2.26)
+a1 = 0.128 - 0.054 * Log(m) / Log(10)
+
+'clear-sky solar radiation at earth surface on horizontal surface (W/m^2) (Bras eqn 2.25)
+Iclear = I0 * Exp(-nfac * a1 * m)
+
+
+'diagnostic output
+' Sheets("debug").Select
+'  ActiveCell.Formula = dayfrac
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = el
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = R
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = Rtest
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = Iclear
+'  ActiveCell.Offset(1, -4).Select
+
+
+End Sub
+
+
+Sub RyanStolzSolar(el, R, atc, z, rs)
+'Ryan-Stolzenbach method for atmospheric attenuation of solar radiation from a clear sky
+
+' input variables
+'   jd      julian day (Jan 1=1 etc)
+'   year = current year
+'   dayfrac = current time of day as a fraction of the day (0-1)
+'   el      solar elevation deg from horizon
+'   R = distance from earth to sun in AU
+'   atc     atmospheric transmission coefficient (0.70-0.91, default 0.8)
+'   z       elevation, metres -- required if imthd=2
+
+' output variable
+'   rs      clear-sky solar radiation, W m-2
+
+Dim r0 As Double, at As Double
+Dim sinal As Double, al As Double, a0 As Double
+Dim rs_toa As Double, Rtest As Double, rm As Double
+
+'NREL solar constant, W m-2
+r0 = 1367#
+
+' atmospheric transmission coefficient (0.70-0.91)
+' from ryan et al. mit publication
+at = atc
+
+sinal = Sin(degToRad(el))          'Sine of the solar elevation angle
+
+If sinal < 0 Then
+  
+  rs = 0#
+
+Else
+  
+  al = Asin(sinal)
+  a0 = radToDeg(al)                 'convert the radians to degree
+
+  'ratio of actual earth-sun distance to mean earth-sun distance (Bras eqn 2.10) for comparison with NOAA/Meeus estimate
+  'If year / 4 - Int(year / 4) = 0 Then
+  ' Rtest = 1 + 0.017 * Cos((2 * pii / 366) * (186 - jd - 1 + dayfrac))
+  'Else
+  ' Rtest = 1 + 0.017 * Cos((2 * pii / 365) * (186 - jd - 1 + dayfrac))
+  'End If
+    
+  rm = (((288# - 0.0065 * z) / 288#) ^ 5.256) / (sinal + 0.15 * (a0 + 3.885) ^ (-1.253))
+
+  rs_toa = r0 * sinal / R ^ 2       'RS on the top of atmosphere
+  rs = rs_toa * (at ^ rm)           'RS on the ground
+  
+End If
+
+'diagnostic output
+' Sheets("debug").Select
+'  ActiveCell.Formula = dayfrac
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = el
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = R
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = Rtest
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = rs
+'  ActiveCell.Offset(1, -4).Select
+
+
+End Sub
+
+
+Function Asin(x)
+Asin = pii / 2 - (1 - x) ^ 0.5 * (1.5707288 - 0.2121144 * x + 0.074261 * x ^ 2 - 0.0187293 * x ^ 3)
+End Function
+
+
+Function Julcvt(mo, da, yr)
+Dim leap As Integer
+If yr / 4 - Int(yr / 4) = 0 Then leap = 1
+Select Case mo
+  Case 1
+    Julcvt = 0
+  Case 2
+    Julcvt = 31
+  Case 3
+    Julcvt = 59 + leap
+  Case 4
+    Julcvt = 90
+  Case 5
+    Julcvt = 120
+  Case 6
+    Julcvt = 151
+  Case 7
+    Julcvt = 181
+  Case 8
+    Julcvt = 212
+  Case 9
+    Julcvt = 243
+  Case 10
+    Julcvt = 273
+  Case 11
+    Julcvt = 304
+  Case 12
+    Julcvt = 334
+End Select
+Julcvt = Julcvt + da
+End Function
+
+
+Option Explicit
+
+
+Sub AtmosTrans(zenith, day, height, visibility, RH, tempK, O3, alphag, directHz, diffuseHz)
+
+'; NAME:
+';       AtmosTrans
+';
+'; PURPOSE:
+';       Computes direct & diffuse solar irradiance for clear skies
+';
+'; CATEGORY:
+';       Solar Radiation
+';       Atmospheric Sciences
+';
+'; CALLING SEQUENCE:
+';       result = AtmosTrans(zenith,[day,height,visibility,RH,TempK,O3,alphag,TAU=tau,verbose=verbose])
+';
+'; INPUTS:
+';       zenith: solar zenithal angle (degrees)
+';               (relative to horizontal surface) (REF:1)
+';       day: day of the year (1 : 365)
+';       height: elevation above sea level
+';       visibility: in Km, for aerosol attenuation (5 < vis < 180 Km)
+';               aerosol alternatives to be implemented (default = 50 Km)
+';       RH: relative humidity (0:100)%
+';       TempK: temperature, degrees Kelvin
+';       O3: ozone layer thickness in cm (from REF:2)
+';       alphag = ground albedo (default = 0.15)
+';
+'; KEYWORDS:
+';       MS: float variable.
+';               set this value to ground albedo (0.0 to 1.0)
+';               to compute multiple scattering between ground and Sky
+';       TAU: named structure.  Will contain individual transmittances due to:
+';               tauR: Rayleigh scattering
+';               tauG: uniformly mixed gases other that water vapour
+';               tauW: water vapour
+';               tauO: ozone
+';               tauA: aerosols
+';
+'; ADDITIONAL KEYWORDS
+';   VERBOSE: let you know what's doing
+';
+'; OUTPUTS:
+';       Result: 2-dimensional array  [In, Id]
+';               Idirect = In: direct irradiance normal to surface
+';               Idiffuse = Id: diffusse irradiance
+';
+'; REQUIREMENTS:
+';       FUNCTION wvapsat
+';   FUNCTION  z2P
+';
+'; NOTES:
+';       1) 1 Dobson Unit (DU) is defined to be 0.01 mm thickness at stp.
+';
+'; COMMENTS:
+';       If no optional parameters are given, it computes irradiance at
+';       sea level and standard atmosphere
+';
+'; REFERENCES:
+';
+';; REF:1
+';; http://www.dict.org/bin/Dict?Form=Dict2&Database=devils&Query=ZENITH
+';;
+';; REF:2
+';; TOMS/EP Total Ozone Mapping Spectrometer / Earth Probe
+';; http://toms.gsfc.nasa.gov/ozone/ozone.html
+';;
+';; Spencer, J. W.: 1971, Fourier series representation of the position of
+';; the sun, Search 2, 172.
+';;
+';; more info and references:
+';; http://www.geo.ed.ac.uk/~jgc/research.html
+';  Copyright (c) 2002 Javier G Corripio.
+';
+';  jgc@geo.ed.ac.uk  http://www.geo.ed.ac.uk/~jgc/
+';  This software may be used, copied, or redistributed as long as it is not
+';  sold and this copyright notice is reproduced on each copy made.  This
+';  routine is provided as is without any express or implied warranties
+';  whatsoever.
+
+Const pii As Double = 3.14159265358979
+
+Dim stlapse As Double, radeg As Double, theta As Double, Isc As Double
+Dim ssctalb As Double, Fc As Double, Rearth As Double, Md As Double
+Dim atmos_P0 As Double, atmos_T0 As Double, atmos_R As Double
+Dim earth_G As Double
+Dim ice As Boolean
+
+Dim Pz As Double, Mr As Double, Ma As Double
+Dim wvap_s As Double, Wprec As Double
+Dim dayang_S As Double, rho2 As Double
+Dim tauR As Double, tauO As Double, tauG As Double, tauW As Double, tauA As Double
+Dim tauTotal As Double, tauaa As Double, tauas As Double
+Dim B_z As Double, alpha_atmos As Double
+Dim Idr As Double, Ida As Double, Idm As Double
+Dim Idirect As Double       'direct normal (W/m^2)
+Dim Idiffuse As Double      'diffuse on horizontal surface (W/m^2)
+
+';----- PARAMETERS & Variables ------------------------------------------------
+
+stlapse = -0.0065            '; standard lapse rate K/m
+radeg = 180# / pii           '; radianes to degrees double precission
+theta = zenith / radeg       '; solar zenith angle radians
+Isc = 1367#                  '; solar constant (Wm^(-2))
+ssctalb = 0.9                '; single scattering albedo (aerosols)(Iqbal, 1983)
+Fc = 0.84                    '; ratio of forward to total energy scattered (Iqbal, 1983)
+Rearth = 6375676.6           '; Average earth's radius (m)
+Md = 28.966                  '; Molecular weight of dry air
+atmos_P0 = 101325#           '; Standard sea-level atmospheric pressure Pa
+atmos_T0 = 288.15            '; Standard sea-level Temperature
+atmos_R = 8.31432            '; Universal gas constant (J deg-1 kmol-1)
+earth_G = 9.80665            '; Acceleration due to gravity (m s-2)
+
+'; alpha_atmos   ; atmospheric albedo
+'; alphag        ; ground albedo
+'; In            ; direct normal irradiance (Wm^(-2))
+'; Id            ; total diffuse irradiance on a horizontal surface(Wm^(-2))
+'; Idr           ; diffuse irradiance on a h.s.-> molecular scattering (Wm^(-2))
+'; Ida           ; diffuse irradiance on a h.s.-> aerosols (Wm^(-2))
+'; Idm           ; diffuse irradiance on a h.s.-> multiplescattering (Wm^(-2))
+'; Mr            ; relative optical air mass
+'; Ma            ; relative optical air mass pressure corrected
+'; Pz            ; pressure at height z
+'; zenith        ; solar zenith angle degrees
+'; wvap_s        ; saturated vapour pressure (Leckner, 1978)
+'; Wprec         ; precipitable water (Leckner, 1978)
+'; TempK         ; temperature in Kelvin
+';------------------------------------------------------------------------------
+
+';------ ATMOSPHERIC PARAMETERS---------------------------------------------
+
+';*** pressure as a function of altitude US standard atmosphere p. 12 & 3
+
+Pz = Z2P(height, atmos_P0 / 100, atmos_T0)
+
+Mr = 1# / (Cos(theta) + 0.15 * ((93.885 - zenith) ^ (-1.253)))
+
+Ma = Mr * Pz / 1013.25
+
+';** Use Lowe(1977) Lowe's polynomials for vapor pressure
+ice = False
+wvap_s = wVapSat(tempK, ice)
+
+Wprec = 46.5 * (RH / 100#) * wvap_s / tempK     ';Prata 1996
+
+';------- SUN EARTH DISTANCE: Spencer(1971) ---------------------------------
+        ';eccentricity correction
+dayang_S = 2# * pii * (day - 1) / 365#
+rho2 = 1.00011 + _
+                0.034221 * Cos(dayang_S) + 0.00128 * Sin(dayang_S) + _
+                0.000719 * Cos(2 * dayang_S) + 0.000077 * Sin(2 * dayang_S)
+
+';--------------- DIRECT IRRADIANCE ------------------------------------------
+
+tauR = Exp((-0.0903 * (Ma ^ 0.84)) * (1# + Ma - (Ma ^ 1.01)))
+
+tauO = 1# - ((0.1611 * (O3 * Mr) * (1# + 139.48 * (O3 * Mr)) ^ (-0.3035)) - _
+        0.002715 * (O3 * Mr) * (1# + 0.044 * (O3 * Mr) + 0.0003 * (O3 * Mr) ^ 2) ^ (-1))
+
+tauG = Exp(-0.0127 * (Ma ^ 0.26))
+
+tauW = 1# - 2.4959 * (Wprec * Mr) * ((1# + 79.034 * (Wprec * Mr)) ^ 0.6828 + _
+        6.385 * (Wprec * Mr)) ^ (-1)
+        ';** Wprec is pressure & temperature corrected,
+        ';** Mr need not to be correcred (Iqbal83, p. 176)
+
+tauA = (0.97 - 1.265 * (visibility ^ (-0.66))) ^ (Ma ^ 0.9) ';Mächler, 1983
+        ';** uses parameterization model A (visibility) (Iqbal83)
+
+';**************************************************************************
+
+'; Apply correction for altitude:  Bintanja (1996)
+B_z = 2.2 * 10# ^ (-5)   '; m^-1
+    
+'; Bz increases linearly linear up to 3000m, then constant up to 5-6000m
+If height <= 3000# Then
+    B_z = B_z * height
+Else
+    B_z = B_z * 3000#
+End If
+
+';**************************************************************************
+
+tauTotal = tauR * tauO * tauG * tauW * tauA + B_z ';*******************
+
+Idirect = 0.9751 * rho2 * Isc * tauTotal
+directHz = Idirect * Cos(degToRad(zenith))
+
+';--------------- DIFUSE IRRADIANCE ------------------------------------------
+
+tauaa = 1# - (1# - ssctalb) * (1# - Ma + Ma ^ 1.06) * (1# - tauA)
+Idr = 0.79 * rho2 * Isc * Cos(theta) * tauO * tauG * tauW * tauaa * 0.5 * (1# - tauR) / (1# - Ma + Ma ^ (1.02))
+
+tauas = tauA / tauaa
+Ida = 0.79 * rho2 * Isc * Cos(theta) * tauO * tauG * tauW * tauaa * Fc * (1# - tauas) / (1# - Ma + Ma ^ 1.02)
+
+';this one do without MS and incorporate fraction snow ground...
+alpha_atmos = 0.0685 + (1# - Fc) * (1# - tauas)
+Idm = (Idirect * Cos(theta) + Idr + Ida) * alphag * alpha_atmos / (1# - alphag * alpha_atmos)
+
+Idiffuse = Idr + Ida + Idm
+diffuseHz = Idiffuse
+
+'diagnostic Iqbal model calcs
+'If Sheets("debugIbqal").Range("g3").Value = 1 Then
+'Sheets("debugIbqal").Select
+'  ActiveCell.Formula = 90 - zenith
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = tauR
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = tauO
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = tauG
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = tauW
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = tauA
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = B_z
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = tauTotal
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = Idr
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = Ida
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = Idm
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = diffuseHz
+'  ActiveCell.Offset(0, 1).Select
+'  ActiveCell.Formula = directHz
+'  ActiveCell.Offset(1, -12).Select
+'End If
+
+End Sub
+
+
+Function wVapSat(tempK, ice)
+
+'; NAME:
+';   WVAPSAT
+';
+'; PURPOSE:
+';   computes saturated vapor pressure over water and over ice
+';
+'; CATEGORY:
+';   Atmospheric Sciences
+';
+'; CALLING SEQUENCE:
+';   result = wVapSat(TempK,[/WATER,/ICE])
+';
+'; INPUTS:
+';    TempK temperature in Kelvin
+';
+'; KEYWORDS
+';   WATER: set this keyword to compute saturated vapor pressure over water
+';       this is the default
+';   ICE: set this keyword to compute aturated vapor pressure over ice
+';
+'; OUTPUTS:
+';
+';   saturated vapor pressure in hPa (float)
+';
+'; NOTES:
+';   Uses Lowe's polynomials
+';
+'; REFERENCES:
+';
+';; Lowe, P. R.: 1977, An approximating polynomial for the computation of
+';    saturation vapor pressure, Journal of Applied Meteorology 16, 100-103.
+';
+';  Copyright (c) 2002 Javier G Corripio.
+';  jgc@geo.ed.ac.uk  http://www.geo.ed.ac.uk/~jgc/
+';  This software may be used, copied, or redistributed as long as it is not
+';  sold and this copyright notice is reproduced on each copy made.  This
+';  routine is provided as is without any express or implied warranties
+';  whatsoever.
+
+Dim a0 As Double, a1 As Double, a2 As Double, a3 As Double
+Dim a4 As Double, a5 As Double, a6 As Double
+Dim Temp As Double
+Dim step1 As Double, step2 As Double, step3 As Double, step4 As Double, step5 As Double
+
+a0 = 6984.505294    ';Lowe's polynomials for vapor pressure
+a1 = -188.903931
+a2 = 2.133357675
+a3 = -0.01288580973
+a4 = 0.00004393587233
+a5 = -8.023923082E-08
+a6 = 6.136820929E-11
+
+Temp = tempK
+
+If ice = True Then
+    Temp = tempK - 273.15
+    a0 = 6.109177956
+    a1 = 0.503469897
+    a2 = 0.01886013408
+    a3 = 0.0004176223716
+    a4 = 0.00000582472028
+    a5 = 4.838803174E-08
+    a6 = 1.838826904E-10
+End If
+
+'wVapSat = a0 + Temp * (a1 + Temp * (a2 + Temp * (a3 + Temp * (a4 + Temp * (a5 + Temp * a6)))))
+
+'break complex expression into steps:
+step1 = a5 + Temp * a6
+step2 = a4 + Temp * step1
+step3 = a3 + Temp * step2
+step4 = a2 + Temp * step3
+step5 = a1 + Temp * step4
+wVapSat = a0 + Temp * step5
+
+End Function
+
+
+Function Z2P(z, Optional P0, Optional T0)
+
+'; NAME:
+';   Z2P
+';
+'; PURPOSE:
+';   Computes pressure for a given altiutde according to
+';       US standard atmosphere
+';
+'; CATEGORY:
+';   Atmospheric Sciences
+';
+'; CALLING SEQUENCE:
+';   Result = z2p(z)
+';
+'; INPUTS:
+';   z = height a.s.l. (m)
+';
+'; ADDITIONAL INPUTS:
+';   P0 = reference sea level pressure (hPa)
+';   T0 = reference sea level temperature (K)
+';
+'; OUTPUTS:
+';   local pressure (mb)
+';
+'; REFERENCES:
+';   US standard atmosphere
+';       U.S. NOAA: 1976, U.S. standard atmosphere, 1976, NOAA-S/T;
+';       76-1562, U.S. National Oceanic and Atmospheric Administration,
+';       National Aeronautics and Space Administration,
+';       United States Air Force, Washington. 227 pp.
+';
+'; EXAMPLE:
+';   Pz = z2P(z)
+';   Pz = z2P(z,P0,T0)
+';
+';  Copyright (c) 2002 Javier G Corripio.
+';  jgc@geo.ed.ac.uk  http://www.geo.ed.ac.uk/~jgc/
+';  This software may be used, copied, or redistributed as long as it is not
+';  sold and this copyright notice is reproduced on each copy made.  This
+';  routine is provided as is without any express or implied warranties
+';  whatsoever.
+
+';-------- CONSTANTS  ------------------------------------------------
+
+Dim atmos_R As Double, atmos_P0 As Double, atmos_T0 As Double
+Dim earth_G As Double, stlapse As Double, Md As Double, Rearth As Double
+Dim H1 As Double, HB As Double, P_z As Double
+
+atmos_R = 8.31432       '; Universal gas constant (J deg-1 kmol-1)
+atmos_P0 = 101325#      '; Standard sea-level atmospheric pressure Pa
+atmos_T0 = 288.15       '; Standard sea-level Temperature
+earth_G = 9.80665       '; Acceleration due to gravity (m s-2)
+stlapse = -0.0065       '; standard lapse rate K/m
+Md = 28.966             '; Molecular weight of dry air
+Rearth = 6356766#       '; Average earth's radius (m) for geopotential calc.
+
+';--------------------------------------------------------
+
+If P0 <> 0 Then atmos_P0 = P0 * 100#
+If T0 <> 0 Then atmos_T0 = T0
+
+'; pressure as a function of altitude US standard atmosphere p. 12 & 3
+'; stlapse*1000 as in table 4, p. 3  temperature gradient is given in K/km
+
+H1 = (Rearth * z) / (Rearth + z) ';Geopotential height
+HB = 0#
+    
+P_z = atmos_P0 * (atmos_T0 / (atmos_T0 + stlapse * (H1 - HB))) ^ ((earth_G * Md) / (atmos_R * stlapse * 1000))
+Z2P = P_z / 100#    ';Pa to mb
+
+End Function
+
+Option Explicit
+
+
+Function Aa(tempC, clearness)
+'Koberg's Figure 34 to estimate Brunt's c coefficient for atmospheric longwave IR
+'inputs: tempC = air temperature deg C
+'        clearness = ratio of estimated measured to clear sky solar radiation
+'output: Koberg's Brunt's c coefficient (Aa in Q2K)
+
+Dim a As Double, b As Double, c As Double
+
+a = -0.00076437 * clearness ^ 3 + 0.00121134 * clearness ^ 2 - 0.00073087 * clearness + 0.0001106
+b = 0.12796842 * clearness ^ 3 - 0.2204455 * clearness ^ 2 + 0.13397992 * clearness - 0.02586655
+c = -3.25272249 * clearness ^ 3 + 5.65909609 * clearness ^ 2 - 3.43402413 * clearness + 1.43052757
+Aa = a * tempC ^ 2 + b * tempC + c
+
+If Aa > 0.735 Then Aa = 0.735
+
+End Function
+
+
+Option Explicit
+
+
+Function WSpeed(height, roughness, refHeight, refSpeed, refRoughness)
+
+WSpeed = (refSpeed * Log(height / roughness) / Log(refHeight / refRoughness))
+
+' where:
+'
+' refSpeed = measured wind speed (m/s)
+' refHeight = height where wind speed was measured (m)
+' refRoughness = surface roughness length where wind speed was measured (m)
+' WSpeed = wind speed at height of location of interest (m/s)
+' height = height of location of interest (m)
+' roughness = surface roughness length at location of interest (m)
+
+'Background info from www.windpower.org:
+'
+'Wind Shear Formula *)
+'The wind speed at a certain height above ground level is:
+'
+'v = vref ln(z/z0) / ln(zref/z0)
+'v = wind speed at height z above ground level.
+'vref = reference speed, i.e. a wind speed we already know at height zref.
+'ln(...) is the natural logarithm function.
+'z = height above ground level for the desired velocity, v.
+'z0 = roughness length in the current wind direction. Roughness lengths may be found below.
+'zref = reference height, i.e. the height where we know the exact wind speed vref.
+'
+'In the above example, assume we know that the wind is blowing at 7.7 m/s at 20 m height.
+'We wish to know the wind speed at 60 m height. If the roughness length is 0.1 m, then
+'
+'vref = 7.7
+'z = 60
+'z0 = 0.1
+'zref = 20 hence,
+'v = 7.7 ln(60/0.1) / ln(20/0.1) = 9.2966 m/s
+'
+'*) = The formula assumes so-called neutral atmospheric stability conditions,
+'i.e. that the ground surface is neither heated nor cooled compared to the air temperature.
+'Further details may be found in the engineering handbook Guidelines for
+'Design of Wind Turbines from Risoe National Laboratory and DNV.
+'
+'Roughness Classes and Roughness Lengths
+'
+'The roughness class is defined in the European Wind Atlas on the basis of the
+'roughness length in metres z0, i.e. the height above ground level where the
+'wind speed is theoretically zero. ln is the natural logarithm function.
+'
+'if (length <= 0.03)
+'class = 1.699823015 + Ln(Length) / Ln(150)
+'if (length > 0.03)
+'class = 3.912489289 + Ln(Length) / Ln(3.3333333)
+'
+'JavaScript functions to calculate the
+'roughness class from length (rLengthChange)
+'or roughness length from class (rClassChange):
+'
+'function rClassChange(){
+' var cVal=parseFloat(document.forms[0].rCl.value);
+' var rLength=0.0;
+' if (cVal<0 || cVal>5){
+'  alert("Roughness class must be between 0 and 5");
+'  document.forms[0].rCl.value=1;
+' }
+' if (cVal<=1){
+'  rLength=Math.exp((cVal-1.699823015)*Math.log(150));
+' }else{
+'  rLength=Math.exp((cVal-3.912489289)*Math.log(3.3333333));
+' }
+' rlength=0.001*Math.round(1000*cVal);
+' document.forms[0].rLength.value=rLength;
+'}
+'function rLengthChange(){
+' var l=parseFloat(document.forms[0].rLength.value);
+' var cVal=0.0;
+' if (l<0.0001 || l>10){
+'  alert("Roughness length must be between 0.0001&nbsp;m and 10&nbsp;m");
+'  document.forms[0].rLength.value=0.03;
+' }
+' if (l<=0.03){
+'  cVal=1.699823015+Math.log(l)/Math.log(150);
+' }else{
+'  cVal=3.912489289+Math.log(l)/Math.log(3.3333333);
+' }
+' cVal=0.001*Math.round(1000*cVal);
+' document.forms[0].rCl.value=cVal;
+'}
+'
+'Roughness Classes and Roughness Length Table
+'
+'Roughness Class
+'roughness Length m
+'Energy Index(percent)
+'Landscape Type
+'
+'0
+'0.0002
+'100
+'Water surface
+'
+'0.5
+'0.0024
+'73
+'Completely open terrain with a smooth surface, e.g.concrete runways in airports, mowed grass, etc.
+'
+'1
+'0.03
+'52
+'Open agricultural area without fences and hedgerows and very scattered buildings. Only softly rounded hills
+'
+'1.5
+'0.055
+'45
+'Agricultural land with some houses and 8 metre tall sheltering hedgerows with a distance of approx. 1250 metres
+'
+'2
+'0.1
+'39
+'Agricultural land with some houses and 8 metre tall sheltering hedgerows with a distance of approx. 500 metres
+'
+'2.5
+'0.2
+'31
+'Agricultural land with many houses, shrubs and plants, or 8 metre tall sheltering hedgerows with a distance of approx. 250 metres
+'
+'3
+'0.4
+'24
+'Villages, small towns, agricultural land with many or tall sheltering hedgerows, forests and very rough and uneven terrain
+'
+'3.5
+'0.8
+'18
+'Larger cities with tall buildings
+'
+'4
+'1.6
+'13
+'Very large cities with tall buildings and skycrapers
+
+End Function
+
+
+Function dewpoint(tair, RH)
+
+' calculates dewpoint temperature (deg C)
+' from air temp (deg C) and relative humidity (fraction)
+
+Dim esat1 As Double, eair1 As Double
+
+'esat1 = 4.596 * Exp(17.27 * tair / (237.3 + tair))     'saturation vapor pressure (mm Hg)
+esat1 = esat(tair)     'saturation vapor pressure (mm Hg)
+eair1 = RH * esat1                                     'air vapor pressure (mm Hg)
+dewpoint = 237.3 / ((17.27 / Log(eair1 / 4.596)) - 1)
+
+End Function
+
+
+Function RH(tair, tdew)
+
+' calculates dewpoint temperature (deg C)
+' from air temp (deg C) and relative humidity (fraction)
+
+Dim esat1 As Double, eair1 As Double
+
+eair1 = esat(tdew)     'air vapor pressure (mm Hg)
+esat1 = esat(tair)     'saturation vapor pressure (mm Hg)
+RH = eair1 / esat1
+
+End Function
+
+
+Function esat(t)
+
+'Calculates saturation vapor pressure of water in air (mm Hg) at temperature t (deg C).
+'This function can also be used to calculate the air vapor pressure
+'as the saturation vapor pressure at the dewpoint temperature.
+
+esat = 4.596 * Exp(17.27 * t / (237.3 + t))     'saturation vapor pressure (mm Hg)
+
+End Function
+
+
+Function w_per_m2(ly_per_d)
+
+'convert heat flux from cal/cm^2/day to watts/m^2
+
+w_per_m2 = ly_per_d / 2.065466
+
+End Function
+
+
+Function ly_per_d(w_per_m2)
+
+'convert heat flux from watts/m^2 to cal/cm^2/day
+
+ly_per_d = w_per_m2 * 2.065466
+
+End Function
+
+
+Sub subHeatBudget(Te, xl, b, Depth, Qhw, Thw, Qpt, Tept, Qpta, _
+                     Jsnt_wm2, Ta, Td, Uw, Ts, Hsed, sedCond_w, HypoExchFrac, _
+                     Hin, Hout, Hpt, Hpta, Jsnt, longat, back, conv, evap, Jsed, Jhyporheic)
+
+'inputs:     Te = water temperature (unknown if solving for equilibrium temp) (deg C)
+'            xl = segment length (m)
+'            B = segment width (m)
+'            Depth = segment depth (m)
+'            Qhw = headwater flow (m^3/sec)
+'            Thw = headwater temperature (deg C)
+'            Qpt = tributary/groundwater inflow (m^3/sec)
+'            Tpt = tributary/groundwater inflow temperature (deg C)
+'            Qpta = withdrawal/groundwater outflow (m^3/sec)
+'            Jsnt_wm2 = solar shortwave (W/m^2)
+'            tair = air temperature (deg C)
+'            tdew = dewpoint temperature (deg C)
+'            wind = wind speed (m/sec)
+'            Ts = sediment temperature (deg C)
+'            Hsed = sediment thickness (cm)
+'            sedCond_w = sediment thermal conductivity (W/m/degC)
+'            HypoExchFrac = fraction of surface flow exchange with hyporheic sediment layer Hsed (fraction)
+'outputs:    Hin = heat inflow from headwater (cal/cm^2/d)
+'            Hout = heat output from outflow
+'            Hpt = heat inflow from tributaries/groundwater
+'            Hpta = heat outflow from withdrawal/groundwater loss
+'            Jsnt = solar
+'            longat = longwave atmospheric
+'            back = longwave back radiation
+'            conv = air convection/conduction
+'            evap = evaporation
+'            Jsed = sediment conduction
+'            Jhyporheic = hyporheic exchange
+
+
+'Temperature parameters
+Const Acoeff As Double = 0.6, RL As Double = 0.03, Bowen As Double = 0.47
+Const eps As Double = 0.97, sigma As Double = 0.000000117
+Const rhow As Double = 1, Cpw As Double = 1    'water density (g/cm^3), water specific heat (cal/g/degC)
+
+Dim Q As Double
+Dim dH As Double
+Dim fUw As Double, es As Double, eair As Double
+'Dim evap As Double, longat As Double, conv As Double
+'Dim back As Double, Jsnt As Double
+Dim sedCond As Double
+'Dim Jsed As Double
+Dim Ehyporheic As Double
+'Dim Jhyporheic As Double
+
+'Dim Hin As Double, Hout As Double, Hpt As Double, Hpta As Double
+
+Qhw = Qhw * 86400                                             'convert flows to m^3/day
+Qpt = Qpt * 86400
+Qpta = Qpta * 86400
+Q = Qhw + Qpt - Qpta
+
+'transport change in heat flux (dH) in segment
+                                                              'units of (cal/cm^2/d)
+      Hin = Qhw * Thw * rhow * Cpw * 100 / (xl * b)                            'advection from headwater
+      Hout = -Q * Te * rhow * Cpw * 100 / (xl * b)                            'advection outflow
+      Hpt = Qpt * Tept * rhow * Cpw * 100 / (xl * b)                       'tributary/groundwater inflow
+      Hpta = -Qpta * Te * rhow * Cpw * 100 / (xl * b)                        'withdrawal/groundwater outflow
+'      dh = dh + Ep(i - 1) * (Te(i - 1) - Te(i)) * rhow * Cpw  'dispersion with upstream segment
+'      dh = dh + Ep(i) * (Te(i + 1) - Te(i)) * rhow * Cpw      'dispersion with downstream segment
+      dH = Hin + Hout + Hpt + Hpta                             'net heat inflow/outflow from advection (cal/cm^2/day)
+'      fHeatBudget = dH                                        'net heat flux in heat budget (cal/cm^2/d)
+
+'surface heat fluxes (cal/cm^2/day)
+      
+      es = esat(Te)                                           'sat'n vapor pressure of water surface temp (mm Hg)
+      eair = esat(Td)                                         'air vapor pressure (mm Hg)
+      fUw = 19 + 0.95 * Uw ^ 2
+      evap = -fUw * (es - eair)                                'evaporation heat flux (cal/cm^2/d)
+      longat = sigma * (Ta + 273.15) ^ 4 * (Acoeff + 0.031 * Sqr(eair)) * (1 - RL)
+                                                              'longwave atmospheric (cal/cm^2/d)
+      conv = -Bowen * fUw * (Te - Ta)                          'air convection/conduction (cal/cm^2/d)
+      back = -eps * sigma * (Te + 273.15) ^ 4                  'longwave back radiation from water (cal/cm^2/d)
+      Jsnt = ly_per_d(Jsnt_wm2)                               'shortwave solar radiation (cal/cm^2/d)
+      dH = dH + Jsnt + longat + back + conv + evap
+
+'sediment-water heat flux from sediments into the water in units of cal/cm2/day
+      If Hsed = 0 Then
+       Jsed = 0
+      Else
+       sedCond = sedCond_w * 0.2390585 / 100               'convert W/m/degC to cal/sec/cm/degC
+       Jsed = (Ts - Te) * 86400 * 2 * sedCond / Hsed       'sediment conductive heat flux (cal/cm^2/day)
+      End If
+      dH = dH + Jsed
+
+'hyporheic exchange flux in units of (cal/day) * (m3/cm3)
+      Ehyporheic = HypoExchFrac * Q                           'units of m3/d
+      Jhyporheic = Ehyporheic * (Ts - Te) * rhow * Cpw * 100 / (xl * b)
+                                                              'units of (cal/cm^2/d)
+      dH = dH + Jhyporheic
+
+'      fHeatBudget = dH                                        'net heat flux in heat budget (cal/cm^2/d)
+                                                              '(dH = 0 at steady-state)
+
+End Sub
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,49 @@
+Input of site data	
+latitude in decimal degrees (positive in northern hemisphere)	48.45
+longitude in decimal degrees (negative for western hemisphere)	-122.33
+elevation (m)	100
+time zone in hours relative to GMT/UTC (PST= -8, MST= -7, CST= -6, EST= -5)	-8
+daylight savings time	No
+initial response temperature (deg C)	12.0
+minimum response temperature (deg C)	0
+water depth (m)	0.4
+effective shade (fraction from 0 to 1)	0.15
+height of wind speed measurement (m)	10
+effective windspeed (fraction from 0 to 1)	1
+groundwater temperature (deg C)	10
+groundwater inflow (meters per day)	0.00
+sediment thermal conductivity (W/m/deg C)	1.57
+sediment thermal diffusivity (cm^2/sec)	0.00645
+sediment thermal thickness (cm)	10
+hyporheic exchange (meters per day)	0.00
+solar shortwave radiation model for clear sky	Bras
+Bras atmospheric turbidity factor (2=clear, 5=smoggy, default = 2)	2
+Ryan-Stolzenbach atmospheric transmission factor (0.70-0.91, default 0.8)	0.8
+coefficient (KCL1) for cloud adjustment of solar radiation	0.65
+exponent (KCL2) for cloud adjustment of solar radiation	2
+atmospheric longwave radiation model for clear sky	Brutsaert
+parameter for atmospheric longwave emissivity if using the Brutsaert model equation	1.24
+model equation for cloud adjustment of downwelling longwave radiation	Eqn 1
+coefficient (KCL3) for cloud adjustment of downwelling longwave radiation	0.17
+exponent (KCL4) for cloud adjustment of downwelling longwave radiation	2
+wind speed function for evaporation and air convection/conduction	Brady-Graves-Geyer
+maximum temperature change during a time step to test for model stability (deg C)	0.5
+
+Input of meteorological data (use missing data code of -999 for shortwave solar radiation to calculate if there are no data)
+year	month	day	hour	minute	air temperature (deg C)	dewpoint temperature (deg C)	wind speed (m/s)	cloud cover (fraction)	shortwave solar radiation before shade and reflection (W/m^2)
+2003	10	1	0	0	11.61	11.67	0.89	0.13	0.00
+2003	10	1	0	15	11.50	11.57	0.89	0.10	0.00
+2003	10	1	0	30	11.40	11.48	0.89	0.07	0.00
+
+
+Input of water temperature measurements for comparison with predicted response temperature (optional)		
+station (optional)	date+time	observed water temperature (deg C)
+Austin	10/1/03 10:00 AM	11.53
+Austin	10/1/03 10:30 AM	11.53
+
+
+Output of solar position, surface heat fluxes, and response water and sediment temperatures															
+date-time	solar azimuth (deg)	solar elevation (deg)	potential solar radiation at the ground surface before shade and reflection (W/m^2)	solar radiation entering the water after shade and reflection (W/m^2)	longwave atmospheric radiation (W/m^2)	longwave back radiation from water (W/m^2)	convection (W/m^2)	evaporation (W/m^2)	sediment conduction heat flux to the surface water (W/m^2)	hyporheic heat flux to the surface water (W/m^2)	groundwater heat flux to the surface water (W/m^2)	air temperature (deg C)	dewpoint temperature (deg C)	response water temperature (deg C)	response sediment temperature (deg C)
+10/1/03 12:00 AM	0.29	-44.61	0.00	0.00	291.46	-363.27	-1.75	-2.17	0.00	0.00	0.00	11.61	11.67	12.00	12.00
+10/1/03 12:15 AM	5.54	-44.490	0.00	0.00	290.41	-363.27	-2.24	-2.82	0.00	0.00	0.00	11.50	11.57	11.96	12.00
+10/1/03 12:30 AM	10.76	-44.14	0.00	0.00	289.52	-363.07	-2.50	-3.13	1.28	0.00	0.00	11.40	11.48	11.92	12.00
