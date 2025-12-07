@@ -7,7 +7,7 @@ and input/output data structures.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 
 @dataclass
@@ -60,7 +60,7 @@ class ModelConfiguration:
     # Cloud correction parameters
     solar_cloud_kcl1: float = 1.0  # 0-1
     solar_cloud_kcl2: float = 2.0  # 0-5
-    longwave_cloud_method: str = "Eqn 1"  # 'Eqn 1' or 'Eqn 2'
+    longwave_cloud_method: Literal["Eqn 1", "Eqn 2"] = "Eqn 1"  # 'Eqn 1' or 'Eqn 2'
     longwave_cloud_kcl3: float = 1.0  # 0-1
     longwave_cloud_kcl4: float = 2.0  # 0-5
 
