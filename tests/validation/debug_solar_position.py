@@ -19,9 +19,7 @@ print(f"Date/Time: {dt} (local time, timezone UTC{timezone})")
 print()
 
 # Calculate using Python
-azimuth, elevation, distance = NOAASolarPosition.calc_solar_position(
-    lat, lon, dt, timezone, 0
-)
+azimuth, elevation, distance = NOAASolarPosition.calc_solar_position(lat, lon, dt, timezone, 0)
 
 print("Python Results:")
 print(f"  Azimuth: {azimuth:.4f}°")
@@ -79,8 +77,9 @@ lat_rad = lat * math.pi / 180.0
 decl_rad = decl * math.pi / 180.0
 ha_rad = hour_angle * math.pi / 180.0
 
-cos_zenith = (math.sin(lat_rad) * math.sin(decl_rad) + 
-              math.cos(lat_rad) * math.cos(decl_rad) * math.cos(ha_rad))
+cos_zenith = math.sin(lat_rad) * math.sin(decl_rad) + math.cos(lat_rad) * math.cos(
+    decl_rad
+) * math.cos(ha_rad)
 cos_zenith = max(-1.0, min(1.0, cos_zenith))
 zenith = math.acos(cos_zenith) * 180.0 / math.pi
 
@@ -88,8 +87,9 @@ print(f"Zenith angle: {zenith:.6f}°")
 print(f"Elevation (90-zenith): {90.0 - zenith:.6f}°")
 
 # Azimuth calculation
-cos_azimuth = ((math.sin(lat_rad) * math.cos(zenith * math.pi / 180.0)) - math.sin(decl_rad)) / \
-              (math.cos(lat_rad) * math.sin(zenith * math.pi / 180.0))
+cos_azimuth = ((math.sin(lat_rad) * math.cos(zenith * math.pi / 180.0)) - math.sin(decl_rad)) / (
+    math.cos(lat_rad) * math.sin(zenith * math.pi / 180.0)
+)
 cos_azimuth = max(-1.0, min(1.0, cos_azimuth))
 
 print(f"cos(azimuth): {cos_azimuth:.10f}")

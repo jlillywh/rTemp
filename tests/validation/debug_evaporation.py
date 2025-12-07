@@ -32,9 +32,7 @@ print()
 # Step 1: Adjust wind speed from 10m to 7m
 wind_adjuster = WindAdjustment()
 wind_speed_7m = wind_adjuster.adjust_for_height(
-    wind_speed=wind_speed_10m,
-    measured_height=wind_height,
-    target_height=7.0
+    wind_speed=wind_speed_10m, measured_height=wind_height, target_height=7.0
 )
 print("Step 1: Wind Speed Adjustment")
 print(f"  Wind at 10m: {wind_speed_10m} m/s")
@@ -65,7 +63,7 @@ f_w = wind_func.calculate(
     air_temp=air_temp,
     water_temp=water_temp,
     vapor_pressure_air=vapor_pressure_air,
-    vapor_pressure_water=vapor_pressure_water
+    vapor_pressure_water=vapor_pressure_water,
 )
 
 print("Step 4: Wind Function (Brady-Graves-Geyer)")
@@ -78,7 +76,7 @@ print()
 evap_cal = HeatFluxCalculator.calculate_evaporation(
     wind_function=f_w,
     vapor_pressure_water=vapor_pressure_water,
-    vapor_pressure_air=vapor_pressure_air
+    vapor_pressure_air=vapor_pressure_air,
 )
 
 evap_w_m2 = UnitConversions.cal_cm2_day_to_watts_m2(evap_cal)
@@ -111,7 +109,7 @@ print()
 # Hypothesis 1: VBA uses different wind function formula
 print("Hypothesis 1: Different wind function formula")
 print("  VBA might use: f(W) = 19 + 0.95 * W²")
-f_w_alt = 19 + 0.95 * (wind_speed_effective ** 2)
+f_w_alt = 19 + 0.95 * (wind_speed_effective**2)
 evap_alt_cal = -f_w_alt * (vapor_pressure_water - vapor_pressure_air)
 evap_alt_w_m2 = UnitConversions.cal_cm2_day_to_watts_m2(evap_alt_cal)
 print(f"  Alternative f(W) = {f_w_alt:.4f}")
@@ -121,7 +119,7 @@ print()
 
 # Hypothesis 2: VBA doesn't adjust wind from 10m to 7m
 print("Hypothesis 2: VBA uses wind at 10m directly")
-f_w_10m = 9.2 + 0.46 * (wind_speed_10m ** 2)
+f_w_10m = 9.2 + 0.46 * (wind_speed_10m**2)
 evap_10m_cal = -f_w_10m * (vapor_pressure_water - vapor_pressure_air)
 evap_10m_w_m2 = UnitConversions.cal_cm2_day_to_watts_m2(evap_10m_cal)
 print(f"  f(W) at 10m = {f_w_10m:.4f}")
@@ -134,7 +132,7 @@ print()
 print("Hypothesis 3: Different wind adjustment formula")
 # Try different exponent
 wind_7m_alt = wind_speed_10m * (7.0 / 10.0) ** 0.2  # Different exponent
-f_w_alt2 = 9.2 + 0.46 * (wind_7m_alt ** 2)
+f_w_alt2 = 9.2 + 0.46 * (wind_7m_alt**2)
 evap_alt2_cal = -f_w_alt2 * (vapor_pressure_water - vapor_pressure_air)
 evap_alt2_w_m2 = UnitConversions.cal_cm2_day_to_watts_m2(evap_alt2_cal)
 print(f"  Wind at 7m (alt formula) = {wind_7m_alt:.4f} m/s")
@@ -160,6 +158,7 @@ print()
 # W² = (f(W) - 9.2) / 0.46
 # W = sqrt((f(W) - 9.2) / 0.46)
 import math
+
 if required_f_w > 9.2:
     required_wind = math.sqrt((required_f_w - 9.2) / 0.46)
     print(f"  Wind speed that would give this f(W): {required_wind:.4f} m/s")

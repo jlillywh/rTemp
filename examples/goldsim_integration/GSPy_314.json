@@ -1,0 +1,85 @@
+{
+  "python_path": "C:\\Users\\JasonLillywhite\\AppData\\Local\\Programs\\Python\\Python314",
+  "script_path": "rtemp_goldsim_adapter.py",
+  "function_name": "process_data",
+  "log_level": 2,
+  "inputs": [
+    {
+      "name": "Current_Water_Temp",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Current_Sediment_Temp",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Water_Depth",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Latitude",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Longitude",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Elevation",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Timezone",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Air_Temp_Min",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Air_Temp_Max",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Wind_Speed_Avg",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Cloud_Cover_Avg",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Simulation_Date",
+      "type": "scalar",
+      "dimensions": []
+    }
+  ],
+  "outputs": [
+    {
+      "name": "New_Water_Temp",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "New_Sediment_Temp",
+      "type": "scalar",
+      "dimensions": []
+    },
+    {
+      "name": "Daily_Avg_Net_Flux",
+      "type": "scalar",
+      "dimensions": []
+    }
+  ]
+}

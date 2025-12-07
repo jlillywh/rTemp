@@ -1,0 +1,227 @@
+<h2>Integrating the rTemp Water Temperature Model into GoldSim Using GSPy</h2>
+
+<p>This guide demonstrates how to integrate the rTemp water temperature model into GoldSim simulations using the GSPy Python bridge. The integration allows GoldSim to call Python-based thermal physics calculations at each timestep while maintaining control over simulation time and state management.</p>
+
+<h3>Overview of the Integration Architecture</h3>
+
+<p>The integration implements a stateless physics engine pattern. GoldSim operates at a daily timestep and manages state variables through Previous Value elements. At each timestep, GoldSim passes current conditions to Python via the GSPy bridge. The Python adapter disaggregates daily meteorological data to hourly values, executes rTemp at hourly resolution for 24 hours, and returns the end-of-day state back to GoldSim.</p>
+
+<p>[SCREENSHOT: Architecture diagram showing GoldSim, GSPy bridge, Python adapter, and rTemp model components]</p>
+
+<h3>Prerequisites</h3>
+
+<p>The following software is required:</p>
+
+<ul>
+<li>GoldSim version 15 or later (64-bit)</li>
+<li>Python 3.11 or 3.14 (64-bit)</li>
+<li>GSPy version 1.8.8</li>
+<li>Python packages: numpy, pandas, scipy, rtemp</li>
+</ul>
+
+<p>Note that GSPy is Windows-only and requires matching Python versions. For Python 3.14, use GSPy_Release_py314.dll. For Python 3.11, use GSPy_Release_py311.dll.</p>
+
+<h3>Installation Steps</h3>
+
+<h4>Step 1: Install Python and Required Packages</h4>
+
+<p>Download and install Python 3.14 (64-bit) from python.org. During installation, check the option to add Python to PATH. After installation, open a command prompt and install the required packages:</p>
+
+<pre>
+py -3.14 -m pip install numpy pandas scipy rtemp
+</pre>
+
+<p>Verify the installation by checking the Python path:</p>
+
+<pre>
+py -3.14 -c "import sys; print(sys.base_prefix)"
+</pre>
+
+<p>Record this path as it will be needed in the configuration file.</p>
+
+<h4>Step 2: Download and Configure GSPy</h4>
+
+<p>Download GSPy version 1.8.8 from the GitHub releases page at github.com/GoldSim/GSPy/releases. Extract the ZIP file and locate the DLL that matches your Python version. For Python 3.14, use GSPy_Release_py314.dll. Copy this file to your GoldSim project directory and rename it to match your project naming convention (for example, GSPy_314.dll).</p>
+
+<h4>Step 3: Create the Python Adapter Script</h4>
+
+<p>Create a file named rtemp_goldsim_adapter.py in your GoldSim project directory. This script serves as the interface between GSPy and the rTemp model. The script must define a function named process_data that accepts 14 input arguments and returns 3 output values.</p>
+
+<p>[CODE BLOCK: Python adapter script showing process_data function signature and key components]</p>
+
+<p>The adapter performs the following operations:</p>
+
+<ol>
+<li>Unpacks input arguments from GoldSim</li>
+<li>Validates inputs (water depth, latitude, longitude ranges)</li>
+<li>Checks for dry-bed conditions and bypasses calculation if needed</li>
+<li>Disaggregates daily min/max meteorological data to hourly values</li>
+<li>Constructs a pandas DataFrame with datetime stamps</li>
+<li>Initializes the rTemp model configuration</li>
+<li>Executes rTemp for 24 hours</li>
+<li>Extracts final state and diagnostic values</li>
+<li>Returns results to GoldSim</li>
+</ol>
+
+<p>Set the REFERENCE_DATE variable in the script to match your GoldSim simulation start date. This ensures accurate solar geometry calculations for solar radiation estimates.</p>
+
+<h4>Step 4: Create the JSON Configuration File</h4>
+
+<p>Create a JSON configuration file with the same base name as your DLL. If your DLL is named GSPy_314.dll, create GSPy_314.json. The JSON file must specify the Python path, script path, function name, and define all inputs and outputs.</p>
+
+<p>[CODE BLOCK: JSON configuration showing python_path, script_path, function_name, inputs array, and outputs array]</p>
+
+<p>The python_path must point to your base Python installation, not a virtual environment. Use double backslashes in the path for proper JSON formatting. The inputs and outputs arrays must match the order expected by the Python adapter function.</p>
+
+<h3>GoldSim Model Configuration</h3>
+
+<h4>Creating the External Element</h4>
+
+<p>In GoldSim, right-click and select Insert Element, then choose External. Name the element (for example, rTemp_Physics). In the External element properties:</p>
+
+<ul>
+<li>Set DLL Path to your DLL filename (GSPy_314.dll)</li>
+<li>Set Function Name to GSPy (not process_data)</li>
+</ul>
+
+<p>[SCREENSHOT: External element properties dialog showing DLL and function configuration]</p>
+
+<h4>Configuring Inputs</h4>
+
+<p>Add 14 scalar inputs in the following order:</p>
+
+<ol>
+<li>Current_Water_Temp (degrees C)</li>
+<li>Current_Sediment_Temp (degrees C)</li>
+<li>Water_Depth (meters)</li>
+<li>Latitude (degrees, -90 to 90)</li>
+<li>Longitude (degrees, -180 to 180)</li>
+<li>Elevation (meters)</li>
+<li>Timezone (hours from UTC)</li>
+<li>Air_Temp_Min (degrees C)</li>
+<li>Air_Temp_Max (degrees C)</li>
+<li>Dewpoint_Min (degrees C)</li>
+<li>Dewpoint_Max (degrees C)</li>
+<li>Wind_Speed_Avg (m/s)</li>
+<li>Cloud_Cover_Avg (fraction, 0-1)</li>
+<li>Simulation_Date (elapsed days)</li>
+</ol>
+
+<p>[SCREENSHOT: External element inputs tab showing all 14 inputs configured]</p>
+
+<p>The order is critical. GSPy passes arguments by position, not by name.</p>
+
+<h4>Configuring Outputs</h4>
+
+<p>Add 3 scalar outputs in the following order:</p>
+
+<ol>
+<li>New_Water_Temp (degrees C)</li>
+<li>New_Sediment_Temp (degrees C)</li>
+<li>Daily_Avg_Net_Flux (W/m²)</li>
+</ol>
+
+<p>[SCREENSHOT: External element outputs tab showing all 3 outputs configured]</p>
+
+<h4>Creating State Variable Feedback Loops</h4>
+
+<p>Water and sediment temperatures must persist between timesteps. Create two Previous Value elements:</p>
+
+<p>Water_Temperature:</p>
+<ul>
+<li>Initial Value: 15.0 (or appropriate initial condition)</li>
+<li>Previous Value: rTemp_Physics.New_Water_Temp</li>
+</ul>
+
+<p>Sediment_Temperature:</p>
+<ul>
+<li>Initial Value: 15.0 (or appropriate initial condition)</li>
+<li>Previous Value: rTemp_Physics.New_Sediment_Temp</li>
+</ul>
+
+<p>Connect these Previous Value elements to the External element inputs:</p>
+<ul>
+<li>rTemp_Physics.Current_Water_Temp = Water_Temperature</li>
+<li>rTemp_Physics.Current_Sediment_Temp = Sediment_Temperature</li>
+</ul>
+
+<p>[SCREENSHOT: GoldSim model showing Previous Value elements connected to External element]</p>
+
+<h4>Connecting Other Inputs</h4>
+
+<p>Connect the remaining inputs to appropriate elements in your model:</p>
+
+<ul>
+<li>Water_Depth: from your hydraulic calculations</li>
+<li>Latitude, Longitude, Elevation, Timezone: from site parameter elements (typically constants)</li>
+<li>Air_Temp_Min, Air_Temp_Max, Dewpoint_Min, Dewpoint_Max, Wind_Speed_Avg, Cloud_Cover_Avg: from time series or meteorological data elements</li>
+<li>Simulation_Date: connect to ElapsedTime</li>
+</ul>
+
+<h3>Testing the Integration</h3>
+
+<p>Start with a short simulation duration (10 days) to verify the integration works correctly. Set your simulation timestep to 1 day. Configure initial conditions and meteorological forcing data. For initial testing, use representative values such as:</p>
+
+<ul>
+<li>Latitude: 45.0, Longitude: -122.0, Elevation: 100 m, Timezone: 8</li>
+<li>Initial water temperature: 15 C, Initial sediment temperature: 15 C</li>
+<li>Water depth: 1.0 m</li>
+<li>Summer day meteorology: Air temp 15-30 C, Dewpoint 10-15 C, Wind 2 m/s, Cloud cover 0.3</li>
+</ul>
+
+<p>Run the simulation and check the results. Water temperature should follow air temperature trends but with damped fluctuations due to thermal inertia.</p>
+
+<p>[CHART: Time series showing air temperature (blue) and water temperature (red) over simulation period]</p>
+
+<h3>Troubleshooting Common Issues</h3>
+
+<h4>Error: Py_InitializeFromConfig failed</h4>
+
+<p>This error indicates the JSON file is pointing to a virtual environment instead of the base Python installation. Verify the python_path in your JSON file points to the base Python directory (for example, C:\Users\YourName\AppData\Local\Programs\Python\Python314), not a .venv directory.</p>
+
+<h4>Error: Cannot load DLL</h4>
+
+<p>Verify the DLL filename matches the JSON filename (both should have the same base name). Confirm you are using the correct DLL version for your Python installation (py314 for Python 3.14, py311 for Python 3.11). Check that Python is 64-bit by running:</p>
+
+<pre>
+py -3.14 -c "import struct; print(struct.calcsize('P') * 8)"
+</pre>
+
+<p>This should print 64.</p>
+
+<h4>Error: Error in external function. Return code 1</h4>
+
+<p>Check the log file (GSPy_314.log or similar) in your GoldSim project directory. Look for ERROR entries that indicate the specific problem. Common causes include negative water depth values, invalid latitude/longitude ranges, or missing Python packages.</p>
+
+<h4>Incorrect Solar Radiation Values</h4>
+
+<p>Verify the REFERENCE_DATE in rtemp_goldsim_adapter.py matches your GoldSim simulation start date. Solar radiation calculations depend on the calendar date for accurate sun position and day length.</p>
+
+<h3>Performance Considerations</h3>
+
+<p>The integration executes at approximately 0.1 seconds per day on typical hardware. An annual simulation (365 days) completes in about 36 seconds. For production runs, set log_level to 0 in the JSON file to minimize logging overhead. For development and debugging, use log_level 2 or 3 for detailed execution information.</p>
+
+<h3>Model Validation</h3>
+
+<p>Compare results against standalone rTemp simulations using the same meteorological forcing data. Verify energy balance by examining the Daily_Avg_Net_Flux output. Check that water temperature responds appropriately to meteorological forcing with expected thermal damping. Confirm dry-bed conditions are handled correctly when water depth approaches zero.</p>
+
+<p>[CHART: Comparison of GoldSim-integrated results vs standalone rTemp results]</p>
+
+<h3>Advanced Configuration</h3>
+
+<p>The Python adapter script contains several parameters that can be modified:</p>
+
+<ul>
+<li>DRY_BED_THRESHOLD: Water depth below which calculations are bypassed (default 0.01 m)</li>
+<li>Solar radiation method: Options include Bras, Bird, Iqbal, Ryan</li>
+<li>Longwave radiation method: Options include Brunt, Brutsaert, Swinbank</li>
+<li>Wind function method: Options include Brady-Graves-Geyer and others</li>
+</ul>
+
+<p>These parameters are set in the ModelConfiguration object within the adapter script. Consult the rTemp documentation for details on available methods and their appropriate use cases.</p>
+
+<h3>Conclusion</h3>
+
+<p>The GSPy bridge provides a straightforward method for integrating Python-based models into GoldSim. The rTemp integration demonstrates how to handle temporal disaggregation, state management, and error handling in a production environment. The stateless physics engine pattern allows GoldSim to maintain control over simulation time while leveraging specialized Python libraries for complex calculations.</p>
+
+<p>The complete integration files, including the Python adapter script, example JSON configuration, and validation scripts, are available in the rTemp package documentation.</p>

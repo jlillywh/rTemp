@@ -52,14 +52,14 @@ class TestHeatFluxProperties:
     ):
         """
         Property 13: Energy Conservation in Heat Budget
-        
+
         For any timestep calculation, the sum of all heat flux components
         should equal the rate of temperature change multiplied by heat
         capacity and depth.
-        
+
         This property verifies that:
         ΔT = (Σ fluxes) * Δt / (ρ * Cp * depth)
-        
+
         where:
         - ΔT = temperature change (°C)
         - Σ fluxes = sum of all heat flux components (cal/(cm²·day))
@@ -67,13 +67,13 @@ class TestHeatFluxProperties:
         - ρ = water density (g/cm³)
         - Cp = specific heat of water (cal/(g·°C))
         - depth = water depth (cm)
-        
+
         Validates: Requirements 6.8
         """
         # Calculate longwave back radiation for a typical water temperature
         water_temp = 20.0  # °C
         longwave_back = HeatFluxCalculator.calculate_longwave_back(water_temp)
-        
+
         # Sum all heat flux components (cal/(cm²·day))
         total_flux = (
             solar_radiation
@@ -85,36 +85,37 @@ class TestHeatFluxProperties:
             + hyporheic_exchange
             + groundwater
         )
-        
+
         # Convert water depth from meters to cm
         depth_cm = water_depth * METERS_TO_CM
-        
+
         # Convert water density from kg/m³ to g/cm³
         density_g_cm3 = WATER_DENSITY / 1000.0
-        
+
         # Convert specific heat from J/(kg·°C) to cal/(g·°C)
         specific_heat_cal = WATER_SPECIFIC_HEAT / 4.184
-        
+
         # Calculate heat capacity per unit area (cal/(cm²·°C))
         heat_capacity_per_area = density_g_cm3 * specific_heat_cal * depth_cm
-        
+
         # Calculate temperature change rate (°C/day)
         temp_change_rate = total_flux / heat_capacity_per_area
-        
+
         # Calculate temperature change over timestep (°C)
         temp_change = temp_change_rate * timestep_days
-        
+
         # Verify energy conservation by checking that the temperature change
         # can be reconstructed from the heat flux
         reconstructed_flux = temp_change_rate * heat_capacity_per_area
-        
+
         # The reconstructed flux should equal the total flux
         assert reconstructed_flux == pytest.approx(total_flux, rel=1e-10, abs=1e-10)
-        
+
         # Also verify that the temperature change is finite (not NaN or infinite)
         import math
+
         assert math.isfinite(temp_change)
-        
+
         # For typical fluxes and timesteps, temperature change should be bounded
         # This is a sanity check, not a strict requirement
         if abs(total_flux) < 1000.0 and timestep_days < 0.1:
@@ -141,22 +142,22 @@ class TestHeatFluxProperties:
     ):
         """
         Property: Sediment flux energy balance
-        
+
         For any sediment conduction calculation, the heat flux should be
         proportional to the temperature difference and inversely proportional
         to the sediment thickness.
-        
+
         This verifies that the sediment conduction follows Fourier's law.
-        
+
         Validates: Requirements 6.4
         """
         # Skip if thermal conductivity is zero
         assume(thermal_conductivity > 0.0)
-        
+
         flux = HeatFluxCalculator.calculate_sediment_conduction(
             water_temp, sediment_temp, thermal_conductivity, sediment_thickness
         )
-        
+
         # Verify sign convention
         if sediment_temp > water_temp:
             # Heat flows from sediment to water (positive flux)
@@ -167,14 +168,14 @@ class TestHeatFluxProperties:
         else:
             # No temperature difference, no flux
             assert flux == pytest.approx(0.0, abs=1e-10)
-        
+
         # Verify that flux is proportional to temperature difference
         temp_diff = sediment_temp - water_temp
         if abs(temp_diff) > 0.01:  # Avoid division by near-zero
             # Calculate expected flux magnitude
             # flux ∝ k * ΔT / thickness
             flux_per_degree = flux / temp_diff
-            
+
             # Verify that doubling the temperature difference doubles the flux
             flux_double = HeatFluxCalculator.calculate_sediment_conduction(
                 water_temp, water_temp + 2 * temp_diff, thermal_conductivity, sediment_thickness
@@ -199,17 +200,17 @@ class TestHeatFluxProperties:
     ):
         """
         Property: Groundwater flux proportionality
-        
+
         For any groundwater flux calculation, the heat flux should be
         proportional to the temperature difference and the inflow rate,
         and inversely proportional to the water depth.
-        
+
         Validates: Requirements 6.6
         """
         flux = HeatFluxCalculator.calculate_groundwater_flux(
             water_temp, groundwater_temp, inflow_rate, water_depth
         )
-        
+
         # Verify sign convention
         if groundwater_temp > water_temp:
             # Groundwater brings heat (positive flux)
@@ -220,18 +221,18 @@ class TestHeatFluxProperties:
         else:
             # No temperature difference, no flux
             assert flux == pytest.approx(0.0, abs=1e-10)
-        
+
         # If inflow rate is zero, flux should be zero
         if inflow_rate == 0.0:
             assert flux == 0.0
-        
+
         # Verify proportionality to inflow rate
         if inflow_rate > 0.0 and abs(groundwater_temp - water_temp) > 0.01:
             flux_double_inflow = HeatFluxCalculator.calculate_groundwater_flux(
                 water_temp, groundwater_temp, 2 * inflow_rate, water_depth
             )
             assert flux_double_inflow == pytest.approx(2 * flux, rel=1e-6)
-        
+
         # Verify inverse proportionality to depth
         if abs(groundwater_temp - water_temp) > 0.01 and inflow_rate > 0.0:
             flux_double_depth = HeatFluxCalculator.calculate_groundwater_flux(
@@ -255,16 +256,16 @@ class TestHeatFluxProperties:
     ):
         """
         Property: Evaporation flux sign convention
-        
+
         For any evaporation calculation, the sign of the flux should correctly
         indicate heat gain or loss based on the vapor pressure gradient.
-        
+
         Validates: Requirements 6.1
         """
         flux = HeatFluxCalculator.calculate_evaporation(
             wind_function, vapor_pressure_water, vapor_pressure_air
         )
-        
+
         # Verify sign convention
         if vapor_pressure_water > vapor_pressure_air:
             # Evaporation occurs (heat loss, negative flux)
@@ -275,7 +276,7 @@ class TestHeatFluxProperties:
         else:
             # No gradient, no flux
             assert flux == pytest.approx(0.0, abs=1e-10)
-        
+
         # Verify magnitude is proportional to vapor pressure difference
         vapor_diff = vapor_pressure_water - vapor_pressure_air
         expected_flux = -wind_function * vapor_diff
@@ -297,16 +298,14 @@ class TestHeatFluxProperties:
     ):
         """
         Property: Convection flux sign convention
-        
+
         For any convection calculation, the sign of the flux should correctly
         indicate heat gain or loss based on the temperature gradient.
-        
+
         Validates: Requirements 6.2
         """
-        flux = HeatFluxCalculator.calculate_convection(
-            wind_function, water_temp, air_temp
-        )
-        
+        flux = HeatFluxCalculator.calculate_convection(wind_function, water_temp, air_temp)
+
         # Verify sign convention
         if water_temp > air_temp:
             # Water loses heat to air (negative flux)
@@ -317,7 +316,7 @@ class TestHeatFluxProperties:
         else:
             # No gradient, no flux
             assert flux == pytest.approx(0.0, abs=1e-10)
-        
+
         # Verify magnitude is proportional to temperature difference
         temp_diff = water_temp - air_temp
         expected_flux = -BOWEN_RATIO * wind_function * temp_diff
@@ -332,22 +331,21 @@ class TestHeatFluxProperties:
     def test_longwave_back_always_negative(self, water_temp: float):
         """
         Property: Longwave back radiation is always a heat loss
-        
+
         For any water temperature, longwave back radiation should always
         be negative (heat loss) since the water surface always emits
         thermal radiation.
-        
+
         Validates: Requirements 6.3
         """
         flux = HeatFluxCalculator.calculate_longwave_back(water_temp)
-        
+
         # Longwave back radiation is always a heat loss (negative)
         assert flux < 0.0
-        
+
         # Verify it follows Stefan-Boltzmann law (T⁴ relationship)
         # Higher temperature should result in more negative flux
         if water_temp < 39.0:  # Leave room for comparison
             flux_higher = HeatFluxCalculator.calculate_longwave_back(water_temp + 1.0)
             # Higher temperature = more radiation = more negative flux
             assert flux_higher < flux
-

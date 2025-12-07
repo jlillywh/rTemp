@@ -17,12 +17,12 @@ from rtemp.wind.functions import (
 )
 
 __all__ = [
-    'WindAdjustment',
-    'WindFunction',
-    'WindFunctionBradyGravesGeyer',
-    'WindFunctionMarcianoHarbeck',
-    'WindFunctionRyanHarleman',
-    'WindFunctionEastMesa',
-    'WindFunctionHelfrich',
-    'calculate_virtual_temperature_difference',
+    "WindAdjustment",
+    "WindFunction",
+    "WindFunctionBradyGravesGeyer",
+    "WindFunctionMarcianoHarbeck",
+    "WindFunctionRyanHarleman",
+    "WindFunctionEastMesa",
+    "WindFunctionHelfrich",
+    "calculate_virtual_temperature_difference",
 ]

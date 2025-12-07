@@ -10,16 +10,20 @@ config = ModelConfiguration(
     elevation=100,
     timezone=-8,
     initial_water_temp=12.0,
-    water_depth=0.4
+    water_depth=0.4,
 )
 
-met = pd.DataFrame([{
-    'datetime': datetime(2003, 10, 1, 0, 0),
-    'air_temperature': 11.61,
-    'dewpoint_temperature': 11.67,
-    'wind_speed': 0.89,
-    'cloud_cover': 0.13
-}])
+met = pd.DataFrame(
+    [
+        {
+            "datetime": datetime(2003, 10, 1, 0, 0),
+            "air_temperature": 11.61,
+            "dewpoint_temperature": 11.67,
+            "wind_speed": 0.89,
+            "cloud_cover": 0.13,
+        }
+    ]
+)
 
 model = RTempModel(config)
 results = model.run(met)

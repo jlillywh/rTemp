@@ -5,7 +5,8 @@ A Python implementation of the rTemp water temperature model, which calculates r
 ## About Response Temperature
 
 **Original Concept by:** Greg Pelletier, Washington State Department of Ecology, Olympia, WA  
-**Based on work by:** J.E. Edinger Associates (www.jeeai.com)
+**Based on work by:** J.E. Edinger Associates (www.jeeai.com)  
+**Original rTemp Model:** [Models & Tools for TMDLs - Washington State Department of Ecology](https://ecology.wa.gov/research-data/data-resources/models-spreadsheets/modeling-the-environment/models-tools-for-tmdls)
 
 Response temperature is defined as the temperature that a column of fully mixed water would have if heat fluxes across the surface were the only heat transfer processes. In other words, the water temperature is assumed to be responding only to those heat fluxes.
 
@@ -42,24 +43,15 @@ A similar expression is used for the change in temperature of the surface layer 
 
 ## Overview
 
-This Python implementation provides:
-- **Multiple Calculation Methods**: Choose from various solar radiation, longwave radiation, and wind function models
-- **Comprehensive Heat Budget**: Accounts for all major energy exchange processes
-- **Flexible Configuration**: Extensive parameter customization for different water bodies
-- **Robust Validation**: Input validation with informative warnings and error messages
-- **Diagnostic Output**: Optional detailed output for debugging and analysis
-- **Well-Tested**: Comprehensive unit tests and property-based tests (346 tests passing)
-- **VBA-Validated**: Validated against original VBA implementation with excellent agreement
-
 ## Features
 
 - **Multiple Calculation Methods**: Choose from various solar radiation, longwave radiation, and wind function models
-- **Comprehensive Heat Budget**: Accounts for all major energy exchange processes
-- **Flexible Configuration**: Extensive parameter customization for different water bodies
-- **Robust Validation**: Input validation with informative warnings and error messages
+- **Heat Budget**: Accounts for major energy exchange processes
+- **Configuration**: Parameter customization for different water bodies
+- **Input Validation**: Input validation with warnings and error messages
 - **Diagnostic Output**: Optional detailed output for debugging and analysis
-- **Well-Tested**: Comprehensive unit tests and property-based tests
-- **VBA-Validated**: Validated against original VBA implementation (< 0.08°C water temperature difference)
+- **Test Coverage**: Unit tests and property-based tests (346 tests passing)
+- **VBA Comparison**: Validated against original VBA implementation (0.13°C water temperature RMSE)
 
 ## Installation
 
@@ -117,6 +109,20 @@ results = model.run(met_data)
 # Export results
 results.to_csv("water_temperature_results.csv")
 ```
+
+## Examples
+
+### GoldSim Integration
+
+A complete example of integrating rTemp into GoldSim using the GSPy Python bridge is available in `examples/goldsim_integration/`. This example demonstrates:
+
+- Stateless physics engine pattern
+- Daily to hourly temporal disaggregation
+- State management via GoldSim Previous Value elements
+- Automatic dewpoint estimation from air temperature
+- Complete setup and configuration instructions
+
+See [examples/goldsim_integration/README.md](examples/goldsim_integration/README.md) for details.
 
 ## Development
 
@@ -238,30 +244,30 @@ The Python implementation has been validated against the original VBA rTemp mode
 - **Maximum Difference**: 0.39°C (occurs on 1 day, 1% of period)
 
 ### Heat Flux Components
-| Component | RMSE | Mean % Error | Status |
-|-----------|------|--------------|--------|
-| Solar Radiation | 6.82 W/m² | 2.4% | ✅ Excellent |
-| Longwave Atmospheric | 0.13 W/m² | 0.07% | ✅ Excellent |
-| Longwave Back | 0.60 W/m² | 0.59% | ✅ Excellent |
-| Convection | 0.64 W/m² | - | ✅ Good |
-| Evaporation | 0.71 W/m² | - | ✅ Good |
-| Sediment Conduction | 5.44 W/m² | - | ✅ Acceptable |
+| Component | RMSE | Mean % Error |
+|-----------|------|--------------|
+| Solar Radiation | 6.82 W/m² | 2.4% |
+| Longwave Atmospheric | 0.13 W/m² | 0.07% |
+| Longwave Back | 0.60 W/m² | 0.59% |
+| Convection | 0.64 W/m² | - |
+| Evaporation | 0.71 W/m² | - |
+| Sediment Conduction | 5.44 W/m² | - |
 
 ### Solar Position Accuracy
-- **Elevation Difference**: 0.02-0.09° (agreement)
+- **Elevation Difference**: 0.02-0.09°
 - **NOAA Algorithm**: Verified correct implementation
 
 ### Test Coverage
 - **Total Tests**: 346 passing
-- **Unit Tests**: Comprehensive coverage of all components
+- **Unit Tests**: Coverage of all components
 - **Property Tests**: Hypothesis-based testing for edge cases
 - **Integration Tests**: Full model validation scenarios
 - **Validation Tests**: Comparison with VBA reference implementation
 
 ### Key Improvements from Original VBA
 1. **Measured Solar Radiation Support**: Uses measured data when available
-2. **Improved Numerical Stability**: Better handling of edge cases
-3. **Validation**: Comprehensive input checking and warnings
+2. **Numerical Stability**: Better handling of edge cases
+3. **Input Checking**: Input validation with warnings
 
 See [docs/validation/](docs/validation/) for detailed validation methodology and results.
 

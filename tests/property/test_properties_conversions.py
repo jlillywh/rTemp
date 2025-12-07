@@ -24,10 +24,10 @@ class TestUnitConversionProperties:
     def test_heat_flux_round_trip_property(self, value: float):
         """
         Property 14: Unit Conversion Round Trip - Heat Flux
-        
+
         For any numeric value, converting from W/m² to cal/(cm²·day) and back
         should produce the original value within numerical precision.
-        
+
         Validates: Requirements 7.1-7.2
         """
         converted = UnitConversions.watts_m2_to_cal_cm2_day(value)
@@ -41,10 +41,10 @@ class TestUnitConversionProperties:
     def test_angle_round_trip_property(self, degrees: float):
         """
         Property 14: Unit Conversion Round Trip - Angles
-        
+
         For any angle in degrees, converting to radians and back should
         produce the original value within numerical precision.
-        
+
         Validates: Requirements 7.7-7.8
         """
         radians = UnitConversions.deg_to_rad(degrees)
@@ -58,10 +58,10 @@ class TestUnitConversionProperties:
     def test_temperature_round_trip_property(self, celsius: float):
         """
         Property 14: Unit Conversion Round Trip - Temperature
-        
+
         For any temperature in Celsius, converting to Kelvin and back should
         produce the original value within numerical precision.
-        
+
         Validates: Requirements 7.6
         """
         kelvin = UnitConversions.celsius_to_kelvin(celsius)
@@ -75,10 +75,10 @@ class TestUnitConversionProperties:
     def test_length_round_trip_property(self, meters: float):
         """
         Property 14: Unit Conversion Round Trip - Length
-        
+
         For any length in meters, converting to centimeters and back should
         produce the original value within numerical precision.
-        
+
         Validates: Requirements 7.3
         """
         centimeters = UnitConversions.meters_to_centimeters(meters)
@@ -92,10 +92,10 @@ class TestUnitConversionProperties:
     def test_wind_speed_round_trip_property(self, m_s: float):
         """
         Property 14: Unit Conversion Round Trip - Wind Speed
-        
+
         For any wind speed in m/s, converting to mph and back should
         produce the original value within numerical precision.
-        
+
         Validates: Requirements 7.5
         """
         mph = UnitConversions.m_s_to_mph(m_s)
@@ -109,10 +109,10 @@ class TestUnitConversionProperties:
     def test_thermal_conductivity_round_trip_property(self, w_m_c: float):
         """
         Property 14: Unit Conversion Round Trip - Thermal Conductivity
-        
+
         For any thermal conductivity in W/(m·°C), converting to cal/(s·cm·°C)
         and back should produce the original value within numerical precision.
-        
+
         Validates: Requirements 7.4
         """
         cal_s_cm_c = UnitConversions.w_m_c_to_cal_s_cm_c(w_m_c)
@@ -128,15 +128,14 @@ class TestUnitConversionProperties:
     def test_heat_flux_linearity(self, value1: float, value2: float):
         """
         Property: Conversion linearity for heat flux.
-        
+
         Converting the sum should equal the sum of conversions.
         This verifies that the conversion is a linear operation.
         """
         sum_converted = UnitConversions.watts_m2_to_cal_cm2_day(value1 + value2)
-        converted_sum = (
-            UnitConversions.watts_m2_to_cal_cm2_day(value1)
-            + UnitConversions.watts_m2_to_cal_cm2_day(value2)
-        )
+        converted_sum = UnitConversions.watts_m2_to_cal_cm2_day(
+            value1
+        ) + UnitConversions.watts_m2_to_cal_cm2_day(value2)
         assert sum_converted == pytest.approx(converted_sum, rel=1e-10, abs=1e-10)
 
     # Additional property: Zero preservation
@@ -161,7 +160,7 @@ class TestUnitConversionProperties:
     def test_zero_preservation(self, conversion_func):
         """
         Property: Zero preservation.
-        
+
         Converting zero should always produce zero (except for temperature
         conversions which have an offset).
         """
@@ -171,6 +170,6 @@ class TestUnitConversionProperties:
             UnitConversions.kelvin_to_celsius,
         ]:
             pytest.skip("Temperature conversions have an offset")
-        
+
         result = conversion_func(0.0)
         assert result == pytest.approx(0.0, abs=1e-10)

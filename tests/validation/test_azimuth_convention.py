@@ -18,9 +18,7 @@ print(f"Date/Time: {dt} (local time, timezone UTC{timezone})")
 print()
 
 # Calculate solar position
-azimuth, elevation, distance = NOAASolarPosition.calc_solar_position(
-    lat, lon, dt, timezone, 0
-)
+azimuth, elevation, distance = NOAASolarPosition.calc_solar_position(lat, lon, dt, timezone, 0)
 
 print("Python (NOAA) Results:")
 print(f"  Azimuth: {azimuth:.2f}°")
@@ -70,4 +68,6 @@ print(f"Python Azimuth: {azimuth_noon:.2f}°")
 print(f"Python Elevation: {elevation_noon:.2f}°")
 print()
 print("At solar noon, azimuth should be close to 180° (due south)")
-print(f"Result: {azimuth_noon:.2f}° - {'✓ Correct' if 170 < azimuth_noon < 190 else '✗ Unexpected'}")
+print(
+    f"Result: {azimuth_noon:.2f}° - {'✓ Correct' if 170 < azimuth_noon < 190 else '✗ Unexpected'}"
+)

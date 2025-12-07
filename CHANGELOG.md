@@ -5,6 +5,49 @@ All notable changes to the rTemp project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-12-06
+
+### Added
+
+#### GoldSim Integration Example
+- Complete GoldSim integration example in `examples/goldsim_integration/`
+- Python adapter script with automatic dewpoint estimation (12 inputs, 3 outputs)
+- GSPy configuration file for Python 3.14
+- Comprehensive integration documentation:
+  - Quick start guide (README.md)
+  - Complete integration guide
+  - Quick reference for inputs/outputs
+  - Troubleshooting guide
+  - Dewpoint estimation guide
+  - Cloud cover estimation from precipitation
+  - Visual wiring diagram
+  - Setup checklist
+  - Migration guide
+- Environment validation script
+- JSON configuration validator
+- Automated setup script
+- Technical blog post describing the integration
+
+#### Features
+- **Automatic Dewpoint Estimation**: Estimates dewpoint from air temperature using climate-appropriate depression values (eliminates need for dewpoint inputs)
+- **Temporal Disaggregation**: Converts daily min/max meteorological data to hourly values using solar position
+- **Stateless Physics Engine**: GoldSim manages state while Python performs thermal calculations
+- **Dry-Bed Handling**: Gracefully handles shallow water conditions (depth < 0.01 m)
+- **State Management**: Uses GoldSim Previous Value elements for feedback loops
+
+#### Documentation
+- Project organization documentation (PROJECT_ORGANIZATION.md)
+- Examples directory with README
+- Link to original Washington State Department of Ecology rTemp model in README
+
+### Changed
+- Updated README with GoldSim integration example reference
+- Reorganized project structure with dedicated examples directory
+- Added .kiro/ to .gitignore
+
+### Fixed
+- Corrected examples/goldsim_integration/rtemp_goldsim_adapter.py to use 12 inputs (removed dewpoint inputs)
+
 ## [1.0.0] - 2024-12-06
 
 ### 🎉 Initial Production Release

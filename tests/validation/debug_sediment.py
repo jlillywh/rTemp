@@ -31,23 +31,25 @@ for ts in timesteps:
     print("-" * 80)
     print(f"  Water temperature: {ts['water_temp']}°C")
     print(f"  Sediment temperature: {ts['sediment_temp']}°C")
-    print(f"  Temperature difference (sediment - water): {ts['sediment_temp'] - ts['water_temp']}°C")
+    print(
+        f"  Temperature difference (sediment - water): {ts['sediment_temp'] - ts['water_temp']}°C"
+    )
     print()
-    
+
     # Calculate using Python
     flux_cal = HeatFluxCalculator.calculate_sediment_conduction(
-        water_temp=ts['water_temp'],
-        sediment_temp=ts['sediment_temp'],
+        water_temp=ts["water_temp"],
+        sediment_temp=ts["sediment_temp"],
         thermal_conductivity=sediment_conductivity,
-        sediment_thickness=sediment_thickness
+        sediment_thickness=sediment_thickness,
     )
     flux_w_m2 = UnitConversions.cal_cm2_day_to_watts_m2(flux_cal)
-    
+
     print(f"  Python calculation:")
     print(f"    Flux: {flux_cal:.4f} cal/(cm²·day)")
     print(f"    Flux: {flux_w_m2:.4f} W/m²")
     print()
-    
+
     print(f"  VBA output: {ts['vba_flux']:.4f} W/m²")
     print(f"  Difference: {flux_w_m2 - ts['vba_flux']:.4f} W/m²")
     print()
@@ -107,29 +109,31 @@ config = ModelConfiguration(
     enable_diagnostics=True,
 )
 
-met_data = pd.DataFrame([
-    {
-        'datetime': datetime(2003, 10, 1, 0, 0),
-        'air_temperature': 11.61,
-        'dewpoint_temperature': 11.67,
-        'wind_speed': 0.89,
-        'cloud_cover': 0.13,
-    },
-    {
-        'datetime': datetime(2003, 10, 1, 0, 15),
-        'air_temperature': 11.50,
-        'dewpoint_temperature': 11.57,
-        'wind_speed': 0.89,
-        'cloud_cover': 0.10,
-    },
-    {
-        'datetime': datetime(2003, 10, 1, 0, 30),
-        'air_temperature': 11.40,
-        'dewpoint_temperature': 11.48,
-        'wind_speed': 0.89,
-        'cloud_cover': 0.07,
-    },
-])
+met_data = pd.DataFrame(
+    [
+        {
+            "datetime": datetime(2003, 10, 1, 0, 0),
+            "air_temperature": 11.61,
+            "dewpoint_temperature": 11.67,
+            "wind_speed": 0.89,
+            "cloud_cover": 0.13,
+        },
+        {
+            "datetime": datetime(2003, 10, 1, 0, 15),
+            "air_temperature": 11.50,
+            "dewpoint_temperature": 11.57,
+            "wind_speed": 0.89,
+            "cloud_cover": 0.10,
+        },
+        {
+            "datetime": datetime(2003, 10, 1, 0, 30),
+            "air_temperature": 11.40,
+            "dewpoint_temperature": 11.48,
+            "wind_speed": 0.89,
+            "cloud_cover": 0.07,
+        },
+    ]
+)
 
 model = RTempModel(config)
 results = model.run(met_data)

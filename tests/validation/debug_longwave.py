@@ -84,7 +84,7 @@ print(f"  Stefan-Boltzmann constant: {STEFAN_BOLTZMANN} W/(m²·K⁴)")
 print()
 
 # Cloud correction
-cloud_factor = 1.0 + kcl3 * (cloud_cover ** kcl4)
+cloud_factor = 1.0 + kcl3 * (cloud_cover**kcl4)
 emissivity_cloudy = emissivity * cloud_factor
 emissivity_cloudy = max(0.0, min(1.0, emissivity_cloudy))
 
@@ -93,7 +93,7 @@ print(f"  Cloudy emissivity: {emissivity_cloudy:.6f}")
 print()
 
 # Atmospheric radiation
-longwave_raw = emissivity_cloudy * STEFAN_BOLTZMANN * (air_temp_k ** 4)
+longwave_raw = emissivity_cloudy * STEFAN_BOLTZMANN * (air_temp_k**4)
 longwave_with_reflection = longwave_raw * (1.0 - ATMOSPHERIC_REFLECTION)
 
 print(f"  Longwave (before reflection): {longwave_raw:.4f} W/m²")
@@ -102,7 +102,7 @@ print(f"  Longwave (after reflection): {longwave_with_reflection:.4f} W/m²")
 print()
 
 # Back radiation
-back_raw = 0.97 * STEFAN_BOLTZMANN * (water_temp_k ** 4)
+back_raw = 0.97 * STEFAN_BOLTZMANN * (water_temp_k**4)
 print(f"  Back radiation (water emissivity=0.97): {back_raw:.4f} W/m²")
 print()
 
